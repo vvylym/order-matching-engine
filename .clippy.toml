@@ -1,0 +1,7 @@
+# clippy configuration
+
+# cognitive complexity threshold
+cognitive-complexity-threshold = 5
+
+# type complexity threshold
+type-complexity-threshold = 50
