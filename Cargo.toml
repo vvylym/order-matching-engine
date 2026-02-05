@@ -1,0 +1,20 @@
+[package]
+name = "omer"
+description = "An order matching engine implemented in Rust"
+version = "0.1.0"
+edition = "2024"
+authors = ["Guillaume M. <235853469+vvylym@users.noreply.github.com>"]
+readme = "README.md"
+license = "MIT"
+homepage = "https://github.com/vvylym/order-matching-engine"
+documentation = "https://github.com/vvylym/order-matching-engine"
+repository = "https://github.com/vvylym/order-matching-engine.git"
+keywords = ["order", "matching", "engine"]
+categories = ["network", "messaging", "communication"]
+
+[dependencies]
+thiserror = "2.0"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "deny"
