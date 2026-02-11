@@ -21,6 +21,3 @@ missing_docs = "deny"
 
 [dev-dependencies]
 mockall = "0.14"
-rstest = "0.26"
-quickcheck = "1.0"
-quickcheck_macros = "1.1"
