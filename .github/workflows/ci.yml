@@ -23,7 +23,7 @@ jobs:
         with:
           prefix-key: fmt
       - name: cargo fmt --check
-        run: make fmt-check
+        run: cargo fmt --all -- --check
 
   clippy:
     name: clippy (${{ matrix.toolchain }})
@@ -92,7 +92,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: deny
-      - run: make deny
+      - run: cargo deny check
 
   machete:
     name: cargo machete
@@ -109,4 +109,4 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: machete
-      - run: make machete
+      - run: cargo machete --with-metadata
