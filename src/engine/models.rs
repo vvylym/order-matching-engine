@@ -21,6 +21,8 @@ pub struct AddOrderCommand {
     pub id: OrderId,
     /// Unique identifier for the participant
     pub participant_id: ParticipantId,
+    /// Symbol identifier
+    pub symbol_id: SymbolId,
     /// Side of the order
     pub side: Side,
     /// Type of the order
@@ -31,6 +33,16 @@ pub struct AddOrderCommand {
     pub quantity: Quantity,
     /// Time-in-Force of the order
     pub time_in_force: TimeInForce,
+    /// Optional stop price (for stop / stop-limit / trailing orders)
+    pub stop_price: Option<Price>,
+    /// Maximum visible quantity (for iceberg / hidden orders). None = fully visible.
+    pub max_visible_quantity: Option<Quantity>,
+    /// Slippage tolerance (price ticks the aggressor is willing to cross)
+    pub slippage: Option<Price>,
+    /// Trailing offset from reference price (for trailing orders)
+    pub trailing_distance: Option<Price>,
+    /// Trailing step (minimum move before adjusting trailing price)
+    pub trailing_step: Option<Price>,
 }
 
 /// Cancel order command

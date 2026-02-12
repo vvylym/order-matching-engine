@@ -61,4 +61,31 @@ pub enum RejectionError {
     /// Insufficient liquidity
     #[error("insufficient liquidity")]
     InsufficientLiquidity,
+    /// Symbol already exists
+    #[error("symbol already exists")]
+    SymbolDuplicate,
+    /// Symbol not found
+    #[error("symbol not found")]
+    SymbolNotFound,
+    /// Order book already exists
+    #[error("order book already exists")]
+    OrderBookDuplicate,
+    /// Order book not found
+    #[error("order book not found")]
+    OrderBookNotFound,
+    /// Order already exists
+    #[error("order already exists")]
+    OrderDuplicate,
+    /// Invalid order id
+    #[error("invalid order id")]
+    OrderIdInvalid,
+    /// Invalid order type
+    #[error("invalid order type")]
+    OrderTypeInvalid,
+    /// Invalid order parameter (e.g. stop/limit combination)
+    #[error("invalid order parameter")]
+    OrderParameterInvalid,
+    /// Invalid order quantity
+    #[error("invalid order quantity")]
+    OrderQuantityInvalid,
 }
