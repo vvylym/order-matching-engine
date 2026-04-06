@@ -1,16 +1,24 @@
 # order-matching-engine (`omer`)
 
-Minimal **order-matching engine** building blocks in Rust: orders, books, matching and self-trade **traits**, commands, and unified errors. This repo is a **spec / library boundary** you can implement behind your own exchange stack.
+Single-crate **order matching engine** in Rust: a concrete `OrderMatchingEngine` generic over book, store, sequence, policies, and event sink; **ITCH** ingest helpers; **Criterion** benches; and a broad **integration test matrix** (limits, markets, cancel/replace, determinism, stress).
 
-## Status
+Public surface follows the **`OrderMatchingService`** port: `add`, `cancel`, `replace`, **`cancel_by_order_id`**, **`reduce`**, **`execute`**, **`replace_by_new_id`**, and `process` over `OrderCommand` (see [`engine/models.rs`](src/engine/models.rs)).
 
-The published API is intentionally trait-heavy: concrete matching engines, books, and stores are **your** implementations. Unit tests cover dispatch on `OrderMatchingService`, sequence defaults, error formatting, and type smoke checks.
+## Layout (single crate)
+
+| Module | Role |
+|--------|------|
+| `engine` | Commands, `OrderMatchingService` trait, `OrderMatchingEngine` implementation |
+| `book` / `store` | `PriceBook` / `OrderStore` traits + in-crate `btree`, `pool_level`, `dense`, `hash_map` services |
+| `matching` / `self_trade` / `sequence` / `events` | Policies and event sink trait |
+| `itch` | Buffered NASDAQ ITCH-style feed parsing wired into `OrderMatchingEngine` |
 
 ## Quick start
 
 ```bash
 cargo test --all-features --all-targets
-cargo clippy --all-features --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo bench   # Criterion (local); CI compiles benches with `cargo bench --no-run`
 ```
 
 Coverage (requires [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)):
@@ -20,7 +28,27 @@ chmod +x scripts/coverage.sh   # once
 ./scripts/coverage.sh
 ```
 
-CI enforces **≥ 85% line coverage** on the instrumented lines LLVM reports for this crate (mostly small—most of the codebase is types and trait definitions).
+CI enforces **≥ 85% line coverage** on instrumented lines for this crate (`cargo llvm-cov` summary).
+
+## Tests
+
+- **`tests/`** — semantics, integrity, replay, observability, self-trade, property tests (`rstest`, `quickcheck`), ITCH fixture check.
+- **`tests/market_manager.rs`** — scenario stubs marked `ignored` track optional full scenario port from the original bench suite (run with `cargo test -- --ignored` when implemented).
+- **`tests/matching_engine.rs`** — one ignored integration benchmark-style test pending tightened stat assertions.
+
+## Consolidation note
+
+Implementation and ITCH stack derive from the local **`Work/omer`** tree; integration tests from **`Work/order-matching-engine`**, rebased on the extended command API (`symbol_id` and optional fields on `AddOrderCommand`, etc.). A future **workspace split** (lib + thin gateway binaries) is described in the repo planning doc but is **not** required for this single-crate snapshot.
+
+## Performance and safety policy
+
+- **`unsafe`:** The crate keeps **`unsafe_code = forbid`** unless a change introduces a **minimal** `unsafe` scope with **`// SAFETY:`** comments and review—never by default for speed.
+- **CI vs load tests:** Default **PR CI** runs correctness gates (fmt, clippy, tests, coverage, audit, `cargo bench --no-run`). It does **not** run gateway daemons, long soak tests, or full benchmark **executions**. When gateway tests, load tests, or full benches are run elsewhere, **document results** (command, hardware, git SHA, numbers) in the PR or a perf log before merging changes that claim throughput milestones.
+- **Throughput metric:** Any **>1B orders/sec** headline means **end-to-end** throughput—orders that complete the full **client → gateway → matcher** path (validated, routed, and applied by the matcher under an explicit counting rule)—**not** gateway ingress or accept-only counts.
+
+## Performance roadmap
+
+Correctness and coverage first; distributed **gateway + TCP** and **>1B orders/sec (E2E)** remain future Phase 5 work; see project planning docs for scope.
 
 ## Crates.io name
 
