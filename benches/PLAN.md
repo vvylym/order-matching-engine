@@ -4,15 +4,19 @@
 
 This plan maps each category to individual benchmark files under `benches/`, with targets, metrics, and implementation notes.
 
+### Scenario backlog (CppTrader parity)
+
+Topics for a future **MarketManager** (or multi-book façade): **market order**, **limit** crossing, **IOC**, **FOK**, **AON**, **iceberg** / hidden quantity, **stop** and **stop-limit**, **trailing** stop, manual matching, in-flight mitigation. Implementation lives in the engine/harness first; orchestration benches come after.
+
 ---
 
 ## Prerequisites (shared setup)
 
 - **Cargo**: Add `[[bench]]` entries for each bench and a dev-dependency on `criterion` (e.g. `criterion = { version = "0.5", features = ["html_reports"] }`).
 - **Engine in benches**: Bench binaries need a concrete engine. Options:
-  - **A)** Feature-gate in the main crate: e.g. `feature = "bench"` that compiles and exports the same in-memory components used in `tests/common` (e.g. `InMemoryPriceBook`, `InMemoryOrderStore`, `CollectingEventSink`, `IncrementalSequence`, plus policies), so benches can call an `engine_with_memory()`-style constructor.
-  - **B)** Duplicate minimal engine construction inside a shared `benches/common.rs` (or `benches/harness.rs`) that defines in-memory types and `engine_with_memory()` only for the bench binary. This avoids touching the main crate but duplicates code from `tests/common`.
-- **Recommendation**: Prefer **A** (feature `bench` + shared implementations in the crate) to keep one source of truth for “real” engine wiring; keep event sink in bench mode as no-op or minimal (e.g. count-only) for latency/throughput so I/O doesn’t dominate.
+  - **A)** Crate **`harness`** feature (default-on): exports [`omer::harness`](../src/harness/mod.rs) with `InMemoryPriceBook`, `InMemoryOrderStore`, `CollectingEventSink`, `IncrementalSequence`, policies, and `engine_with_memory()` for benches and integration tests.
+  - **B)** Duplicate wiring only inside a bench-local `benches/common.rs` (avoid if **A** exists).
+- **Recommendation**: Use **`harness`** for one source of truth; use a no-op or minimal event sink in latency benches if collection alloc skews numbers.
 
 ---
 
@@ -44,7 +48,7 @@ This plan maps each category to individual benchmark files under `benches/`, wit
 
 **Bench design:**
 
-- **`latency_add`**  
+- **`latency_add`** (**implemented:** `benches/latency_add.rs`, uses `omer::harness`)  
   - **What:** Time per **add** (limit order, resting on book).  
   - **How:** Criterion per-iteration: one `engine.add(add_cmd)`; pre-populate book if needed so the add doesn’t match.  
   - **Report:** p50 / p95 / p99 (e.g. Criterion’s `SamplingMode::Flat` or similar for ns-scale).  

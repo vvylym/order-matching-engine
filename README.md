@@ -12,6 +12,7 @@ Public surface follows the **`OrderMatchingService`** port: `add`, `cancel`, `re
 | `book` / `store` | `PriceBook` / `OrderStore` traits + in-crate `btree`, `pool_level`, `dense`, `hash_map` services |
 | `matching` / `self_trade` / `sequence` / `events` | Policies and event sink trait |
 | `itch` | Buffered NASDAQ ITCH-style feed parsing wired into `OrderMatchingEngine` |
+| `harness` | In-memory book/store/sink/policies + `engine_with_memory()` for tests and benches (**`harness` feature**, on by default; use `default-features = false` to omit) |
 
 ## Quick start
 
@@ -21,7 +22,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo bench   # Criterion (local); CI compiles benches with `cargo bench --no-run`
 ```
 
-Planned bench categories and implementation order: [`benches/PLAN.md`](benches/PLAN.md).
+Planned bench categories and implementation order: [`benches/PLAN.md`](benches/PLAN.md). First **real** hot-path bench: **`latency_add`** (`cargo bench -p omer --bench latency_add`, requires default `harness` feature).
 
 Coverage (requires [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)):
 
@@ -35,8 +36,8 @@ CI enforces **≥ 85% line coverage** on instrumented lines for this crate (`car
 ## Tests
 
 - **`tests/`** — semantics, integrity, replay, observability, self-trade, property tests (`rstest`, `quickcheck`), ITCH fixture check.
-- **`tests/market_manager.rs`** — ignored stubs for future **MarketManager** / CppTrader-style scenarios; see [`benches/PLAN.md`](benches/PLAN.md) for the intended bench matrix (not run in PR CI).
-- **`tests/matching_engine.rs`** — one ignored integration benchmark-style test pending tightened stat assertions.
+- **`tests/market_manager.rs`** — asserts **CppTrader / MarketManager** scenario keywords stay documented in [`benches/PLAN.md`](benches/PLAN.md) (no `#[ignore]` placeholders).
+- **`tests/matching_engine.rs`** — guards that ITCH/matching **bench entries** and README ITCH mention remain present.
 
 ## Consolidation note
 
