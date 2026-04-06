@@ -14,6 +14,8 @@
 //! 1. [`types`] — `Order`, `Price`, `Quantity`, sides, time-in-force.
 //! 2. [`engine`] — commands such as [`OrderCommand`](engine::OrderCommand) (see `engine/models.rs` in source).
 //! 3. [`engine::OrderMatchingEngine`] — wires policies, book, and store; batch feeds via **[`OrderMatchingEngine::process_batch`](engine::OrderMatchingEngine::process_batch)**.
+//! 4. [`pool`] — optional `Order` shell recycling for adapters.
+//! 5. **[`parallel`]** (feature **`parallel`**) — read-mostly `rayon` helpers; the book stays single-writer.
 //!
 //! # Tests and in-memory setup
 //!
@@ -32,10 +34,14 @@ pub mod error;
 pub mod events;
 pub mod itch;
 pub mod matching;
+pub mod pool;
 pub mod self_trade;
 pub mod sequence;
 pub mod store;
 pub mod types;
+
+#[cfg(feature = "parallel")]
+pub mod parallel;
 
 #[cfg(feature = "harness")]
 pub mod harness;

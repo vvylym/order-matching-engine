@@ -1,5 +1,5 @@
 //! **Phase-1 book:** per-side [`SkipMap`] for ordered **price levels** (best bid / best ask)
-//! and [`DashMap`] for **level queues** (`Price` → `Vec<Order>`), plus a HashMap index for cancel-by-id.
+//! and [`DashMap`] for **level queues** (`Price` → `Vec<OrderId>`), plus a HashMap index for cancel-by-id.
 //!
 //! This layout matches the roadmap: concurrent-friendly maps for later parallel batches, while
 //! [`crate::book::PriceBook`] stays single-writer `&mut self` today.
@@ -12,9 +12,9 @@ use dashmap::DashMap;
 use dashmap::mapref::entry::Entry as DEntry;
 
 use crate::book::PriceBook;
-use crate::types::{Order, OrderId, Price, Side};
+use crate::types::{OrderId, Price, Sequence, Side};
 
-type LevelQueue = Vec<Order>;
+type LevelQueue = Vec<OrderId>;
 type OrderLocation = (Price, Side);
 
 /// Single side: skip list of active prices + dash map of FIFO queues at each price.
@@ -26,56 +26,58 @@ struct BookSide {
 }
 
 impl BookSide {
-    fn push(&mut self, price: Price, order: &Order) {
+    fn push(&mut self, price: Price, order_id: OrderId) {
         match self.levels.entry(price) {
             DEntry::Occupied(mut o) => {
-                o.get_mut().push(order.clone());
+                o.get_mut().push(order_id);
             }
             DEntry::Vacant(v) => {
-                v.insert(vec![order.clone()]);
+                v.insert(vec![order_id]);
                 self.prices.insert(price, ());
             }
         }
     }
 
-    fn pop_best_buy(&mut self) -> Option<Order> {
+    fn pop_best_buy(&mut self) -> Option<OrderId> {
         let price = self.prices.back().map(|e| *e.key())?;
         let mut level = self.levels.get_mut(&price)?;
-        let order = level.remove(0);
+        let order_id = level.remove(0);
         if level.is_empty() {
             drop(level);
             self.levels.remove(&price);
             self.prices.remove(&price);
         }
-        Some(order)
+        Some(order_id)
     }
 
-    fn pop_best_sell(&mut self) -> Option<Order> {
+    fn pop_best_sell(&mut self) -> Option<OrderId> {
         let price = self.prices.front().map(|e| *e.key())?;
         let mut level = self.levels.get_mut(&price)?;
-        let order = level.remove(0);
+        let order_id = level.remove(0);
         if level.is_empty() {
             drop(level);
             self.levels.remove(&price);
             self.prices.remove(&price);
         }
-        Some(order)
+        Some(order_id)
     }
 
-    fn remove_order(
-        &mut self,
-        price: Price,
-        order_id: &OrderId,
-    ) -> Option<Order> {
-        let mut level = self.levels.get_mut(&price)?;
-        let pos = level.iter().position(|o| o.id == *order_id)?;
-        let order = level.remove(pos);
+    fn remove_order(&mut self, price: Price, order_id: &OrderId) -> bool {
+        let mut level = match self.levels.get_mut(&price) {
+            Some(l) => l,
+            None => return false,
+        };
+        let pos = match level.iter().position(|id| id == order_id) {
+            Some(p) => p,
+            None => return false,
+        };
+        level.remove(pos);
         if level.is_empty() {
             drop(level);
             self.levels.remove(&price);
             self.prices.remove(&price);
         }
-        Some(order)
+        true
     }
 
     fn best_buy(&self) -> Option<Price> {
@@ -130,29 +132,36 @@ impl PriceBook for DashSkipOrderBook {
         self.asks.best_sell()
     }
 
-    fn push(&mut self, price: &Price, order: &Order) {
-        self.index.insert(order.id, (*price, order.side));
-        match order.side {
-            Side::Buy => self.bids.push(*price, order),
-            Side::Sell => self.asks.push(*price, order),
+    fn push(
+        &mut self,
+        price: &Price,
+        order_id: OrderId,
+        side: Side,
+        _time_priority: Sequence,
+    ) {
+        self.index.insert(order_id, (*price, side));
+        match side {
+            Side::Buy => self.bids.push(*price, order_id),
+            Side::Sell => self.asks.push(*price, order_id),
         }
     }
 
-    fn pop_best(&mut self, aggressor_side: Side) -> Option<Order> {
-        let order = match aggressor_side {
+    fn pop_best(&mut self, aggressor_side: Side) -> Option<OrderId> {
+        let order_id = match aggressor_side {
             Side::Buy => self.asks.pop_best_sell(),
             Side::Sell => self.bids.pop_best_buy(),
         }?;
-        self.index.remove(&order.id);
-        Some(order)
+        self.index.remove(&order_id);
+        Some(order_id)
     }
 
-    fn remove(&mut self, order_id: &OrderId) -> Option<Order> {
-        let (price, side) = self.index.remove(order_id)?;
-        let order = match side {
+    fn remove(&mut self, order_id: &OrderId) -> bool {
+        let Some((price, side)) = self.index.remove(order_id) else {
+            return false;
+        };
+        match side {
             Side::Buy => self.bids.remove_order(price, order_id),
             Side::Sell => self.asks.remove_order(price, order_id),
-        }?;
-        Some(order)
+        }
     }
 }

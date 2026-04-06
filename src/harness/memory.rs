@@ -4,12 +4,12 @@
 
 use crate::book::PriceBook;
 use crate::store::{OrderStore, OrderStoreError};
-use crate::types::{Order, OrderId, Price, Quantity, Side};
+use crate::types::{Order, OrderId, Price, Quantity, Sequence, Side};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
 
-type PriceLevel = BTreeMap<Price, VecDeque<Order>>;
+type PriceLevel = BTreeMap<Price, VecDeque<(OrderId, Sequence)>>;
 
 #[derive(Default)]
 pub struct InMemoryPriceBook {
@@ -21,13 +21,20 @@ impl InMemoryPriceBook {
     fn push_side(
         side: Side,
         price: Price,
-        order: &Order,
+        order_id: OrderId,
+        time_priority: Sequence,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
     ) {
         match side {
-            Side::Buy => bids.entry(price).or_default().push_back(order.clone()),
-            Side::Sell => asks.entry(price).or_default().push_back(order.clone()),
+            Side::Buy => bids
+                .entry(price)
+                .or_default()
+                .push_back((order_id, time_priority)),
+            Side::Sell => asks
+                .entry(price)
+                .or_default()
+                .push_back((order_id, time_priority)),
         }
     }
 
@@ -35,7 +42,7 @@ impl InMemoryPriceBook {
         side: Side,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
-    ) -> Option<Order> {
+    ) -> Option<OrderId> {
         let (best_price, q) = match side {
             Side::Buy => {
                 let best_ask = asks.keys().next().copied()?;
@@ -51,9 +58,9 @@ impl InMemoryPriceBook {
         let idx = q
             .iter()
             .enumerate()
-            .min_by_key(|(_, o)| o.sequence)
+            .min_by_key(|(_, (_, seq))| *seq)
             .map(|(i, _)| i)?;
-        let order = q.remove(idx)?;
+        let (order_id, _) = q.remove(idx)?;
         if q.is_empty() {
             match side {
                 Side::Buy => {
@@ -64,25 +71,27 @@ impl InMemoryPriceBook {
                 }
             }
         }
-        Some(order)
+        Some(order_id)
     }
 
     fn remove_from_side(
         order_id: &OrderId,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
-    ) -> Option<Order> {
+    ) -> bool {
         for q in bids.values_mut() {
-            if let Some(pos) = q.iter().position(|o| o.id == *order_id) {
-                return Some(q.remove(pos).unwrap());
+            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
+                q.remove(pos).unwrap();
+                return true;
             }
         }
         for q in asks.values_mut() {
-            if let Some(pos) = q.iter().position(|o| o.id == *order_id) {
-                return Some(q.remove(pos).unwrap());
+            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
+                q.remove(pos).unwrap();
+                return true;
             }
         }
-        None
+        false
     }
 }
 
@@ -95,21 +104,28 @@ impl PriceBook for InMemoryPriceBook {
         self.asks.keys().next().copied()
     }
 
-    fn push(&mut self, price: &Price, order: &Order) {
+    fn push(
+        &mut self,
+        price: &Price,
+        order_id: OrderId,
+        side: Side,
+        time_priority: Sequence,
+    ) {
         Self::push_side(
-            order.side,
+            side,
             *price,
-            order,
+            order_id,
+            time_priority,
             &mut self.bids,
             &mut self.asks,
         );
     }
 
-    fn pop_best(&mut self, side: Side) -> Option<Order> {
+    fn pop_best(&mut self, side: Side) -> Option<OrderId> {
         Self::pop_best_side(side, &mut self.bids, &mut self.asks)
     }
 
-    fn remove(&mut self, order_id: &OrderId) -> Option<Order> {
+    fn remove(&mut self, order_id: &OrderId) -> bool {
         Self::remove_from_side(order_id, &mut self.bids, &mut self.asks)
     }
 }
@@ -141,18 +157,22 @@ impl OrderStore for InMemoryOrderStore {
 
 impl InMemoryPriceBook {
     #[allow(dead_code)]
-    pub fn total_depth(&self) -> Quantity {
+    /// Sum of `leaves_quantity` for ids queued in the book, resolved via `resolve` (usually [`OrderStore::get`]).
+    pub fn total_depth<F>(&self, mut resolve: F) -> Quantity
+    where
+        F: FnMut(OrderId) -> Option<Quantity>,
+    {
         let bid_qty: Quantity = self
             .bids
             .values()
             .flat_map(|q| q.iter())
-            .map(|o| o.quantity)
+            .filter_map(|&(id, _)| resolve(id))
             .sum();
         let ask_qty: Quantity = self
             .asks
             .values()
             .flat_map(|q| q.iter())
-            .map(|o| o.quantity)
+            .filter_map(|&(id, _)| resolve(id))
             .sum();
         bid_qty + ask_qty
     }
@@ -171,13 +191,25 @@ impl PriceBook for SharedPriceBookHandle {
     fn best_ask(&self) -> Option<Price> {
         PriceBook::best_ask(&*self.0.borrow())
     }
-    fn push(&mut self, price: &Price, order: &Order) {
-        PriceBook::push(&mut *self.0.borrow_mut(), price, order)
+    fn push(
+        &mut self,
+        price: &Price,
+        order_id: OrderId,
+        side: Side,
+        time_priority: Sequence,
+    ) {
+        PriceBook::push(
+            &mut *self.0.borrow_mut(),
+            price,
+            order_id,
+            side,
+            time_priority,
+        )
     }
-    fn pop_best(&mut self, side: Side) -> Option<Order> {
+    fn pop_best(&mut self, side: Side) -> Option<OrderId> {
         PriceBook::pop_best(&mut *self.0.borrow_mut(), side)
     }
-    fn remove(&mut self, order_id: &OrderId) -> Option<Order> {
+    fn remove(&mut self, order_id: &OrderId) -> bool {
         PriceBook::remove(&mut *self.0.borrow_mut(), order_id)
     }
 }

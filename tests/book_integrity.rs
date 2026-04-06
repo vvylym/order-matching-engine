@@ -51,7 +51,7 @@ fn no_crossed_book() {
 /// VIII.2 Depth correctness: total depth equals sum of resting quantities.
 #[test]
 fn depth_correctness() {
-    let (mut engine, _sink, book_handle, _store_handle) =
+    let (mut engine, _sink, book_handle, store_handle) =
         engine_with_shared_state();
     let a = add_cmd(
         1,
@@ -84,7 +84,8 @@ fn depth_correctness() {
     engine.add(b).unwrap();
     engine.add(c).unwrap();
     let book = book_handle.borrow();
-    let total = book.total_depth();
+    let store = store_handle.borrow();
+    let total = book.total_depth(|id| store.get(&id).map(|o| o.leaves_quantity));
     assert_eq!(
         total,
         5 + 10 + 7,

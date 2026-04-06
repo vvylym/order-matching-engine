@@ -8,6 +8,7 @@ use common::{
     EventSnapshot, add_cmd, engine_with_memory, engine_with_shared_state,
 };
 use omer::engine::{OrderCommand, OrderMatchingService};
+use omer::store::OrderStore;
 use omer::types::{OrderType, Side, TimeInForce};
 
 /// IX.1 Deterministic execution: same sequence yields same events and outcome.
@@ -74,8 +75,8 @@ fn deterministic_execution() {
 /// when both complete, then the event logs and final book state (depth) must be identical.
 #[test]
 fn snapshot_replay_state_matches() {
-    let (mut engine1, sink1, book1, _store1) = engine_with_shared_state();
-    let (mut engine2, sink2, book2, _store2) = engine_with_shared_state();
+    let (mut engine1, sink1, book1, store1) = engine_with_shared_state();
+    let (mut engine2, sink2, book2, store2) = engine_with_shared_state();
 
     let cmds: Vec<OrderCommand> = vec![
         OrderCommand::Add(add_cmd(
@@ -139,7 +140,11 @@ fn snapshot_replay_state_matches() {
         }
     }
 
-    let depth1 = book1.borrow().total_depth();
-    let depth2 = book2.borrow().total_depth();
+    let depth1 = book1
+        .borrow()
+        .total_depth(|id| store1.borrow().get(&id).map(|o| o.leaves_quantity));
+    let depth2 = book2
+        .borrow()
+        .total_depth(|id| store2.borrow().get(&id).map(|o| o.leaves_quantity));
     assert_eq!(depth1, depth2, "final book depth must match after replay");
 }

@@ -15,7 +15,7 @@ pub trait OrderStore {
     fn insert(&mut self, order: &Order) -> Result<(), OrderStoreError>;
     /// Remove an order from the store
     fn remove(&mut self, order_id: &OrderId) -> Result<Order, OrderStoreError>;
-    /// Get an order from the store
+    /// Get a clone of the resting order (canonical copy in the store).
     fn get(&self, order_id: &OrderId) -> Option<Order>;
 }
 
