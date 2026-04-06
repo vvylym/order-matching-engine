@@ -1,3 +1,4 @@
+# PR CI: correctness + compile benches (`--no-run`). No gateway daemons, soak, or heavy bench execution.
 name: CI
 
 on:
@@ -61,6 +62,8 @@ jobs:
           prefix-key: test-${{ matrix.toolchain }}
       - name: cargo test
         run: cargo test --workspace --all-features --all-targets
+      - name: compile Criterion benches
+        run: cargo bench --no-run --workspace --all-features
 
   coverage:
     name: coverage (85% lines min)

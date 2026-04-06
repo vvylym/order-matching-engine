@@ -32,6 +32,31 @@ pub enum Error {
     /// Rejection error
     #[error("rejection: {0}")]
     Rejection(#[from] RejectionError),
+    /// Feed / protocol decode error (parse, invalid message type, etc.)
+    #[error("feed: {0}")]
+    Feed(#[from] FeedError),
+}
+
+/// Feed decode errors (protocol parsing, invalid message type).
+#[derive(Debug, thiserror::Error)]
+pub enum FeedError {
+    /// Payload too short for the expected message layout.
+    #[error("parse: need {required} bytes, got {got}")]
+    Parse {
+        /// Bytes required.
+        required: usize,
+        /// Bytes available.
+        got: usize,
+    },
+    /// Invalid buy/sell byte on wire.
+    #[error("invalid buy/sell: 0x{0:02x}")]
+    InvalidBuySell(u8),
+    /// Unknown ITCH message type byte.
+    #[error("invalid message type: 0x{0:02x}")]
+    InvalidMessageType(u8),
+    /// I/O error while reading the stream.
+    #[error("io: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Rejection Error

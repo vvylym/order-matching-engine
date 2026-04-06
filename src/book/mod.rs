@@ -1,5 +1,8 @@
 //! Book module
 //!
+
+pub mod service;
+
 #[cfg(test)]
 use mockall::automock;
 

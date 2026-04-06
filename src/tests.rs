@@ -2,7 +2,9 @@
 
 use crate::book::PriceBook;
 use crate::engine::{
-    AddOrderCommand, CancelOrderCommand, OrderCommand, OrderMatchingService,
+    AddOrderCommand, CancelByOrderIdCommand, CancelOrderCommand,
+    ExecuteOrderCommand, OrderCommand, OrderMatchingService, ReduceOrderCommand,
+    ReplaceOrderByNewIdCommand, ReplaceOrderCommand,
 };
 use crate::error::{Error, RejectionError, Result};
 use crate::events::{Event, EventSinkError};
@@ -29,11 +31,31 @@ impl OrderMatchingService for RecordingMatching {
         Ok(())
     }
 
-    fn replace(
-        &mut self,
-        _cmd: crate::engine::ReplaceOrderCommand,
-    ) -> Result<()> {
+    fn replace(&mut self, _cmd: ReplaceOrderCommand) -> Result<()> {
         self.op = "replace";
+        Ok(())
+    }
+
+    fn cancel_by_order_id(&mut self, _cmd: CancelByOrderIdCommand) -> Result<()> {
+        self.op = "cancel_by_order_id";
+        Ok(())
+    }
+
+    fn reduce(&mut self, _cmd: ReduceOrderCommand) -> Result<()> {
+        self.op = "reduce";
+        Ok(())
+    }
+
+    fn execute(&mut self, _cmd: ExecuteOrderCommand) -> Result<()> {
+        self.op = "execute";
+        Ok(())
+    }
+
+    fn replace_by_new_id(
+        &mut self,
+        _cmd: ReplaceOrderByNewIdCommand,
+    ) -> Result<()> {
+        self.op = "replace_by_new_id";
         Ok(())
     }
 }
@@ -42,7 +64,7 @@ fn sample_add_cmd() -> AddOrderCommand {
     AddOrderCommand {
         id: 1,
         participant_id: 10,
-        symbol_id: 100,
+        symbol_id: 1,
         side: Side::Buy,
         order_type: OrderType::Limit,
         price: Some(100),

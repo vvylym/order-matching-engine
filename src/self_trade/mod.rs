@@ -5,6 +5,21 @@ use mockall::automock;
 
 use crate::types::{Order, OrderId, ParticipantId};
 
+/// Self trade policy that never reports a violation (allow all).
+/// Use for tests and integration (e.g. ITCH ingestion).
+#[derive(Debug, Clone, Default)]
+pub struct AllowAllSelfTradePolicy;
+
+impl SelfTradePolicy for AllowAllSelfTradePolicy {
+    fn violates(
+        &self,
+        _incoming: &Order,
+        _resting: &Order,
+    ) -> Result<bool, SelfTradePolicyError> {
+        Ok(false)
+    }
+}
+
 /// Self trade prevention trait
 #[cfg_attr(test, automock)]
 pub trait SelfTradePolicy {

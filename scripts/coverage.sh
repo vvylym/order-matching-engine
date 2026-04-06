@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# Line coverage (cargo-llvm-cov). Enforces >= 85% on instrumented lines.
-# This crate is mostly type and trait definitions; executable surface is small but gated here.
+# Line coverage (cargo-llvm-cov). Enforces >= 85% on instrumented lines (engine + ITCH + services).
 set -euo pipefail
 
 exec cargo llvm-cov --all-features --all-targets \
