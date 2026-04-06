@@ -9,3 +9,6 @@ pub mod self_trade;
 pub mod sequence;
 pub mod store;
 pub mod types;
+
+#[cfg(test)]
+mod tests;
