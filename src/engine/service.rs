@@ -115,51 +115,58 @@ where
     fn match_and_commit_incoming(&mut self, incoming: &mut Order) -> Result<()> {
         // ─── Matching loop: consume liquidity until none left or order no longer marketable ───
         while incoming.quantity > 0 {
-            // Pop best resting order on the opposite side; stop if book empty.
-            let resting = match self.price_book.pop_best(incoming.side) {
-                Some(o) => o,
+            let resting_id = match self.price_book.pop_best(incoming.side) {
+                Some(id) => id,
                 None => break,
             };
-
-            // Resting limit orders must have a price (book invariant).
+            let mut resting = self.order_store.remove(&resting_id)?;
             let resting_price = match resting.price {
                 Some(p) => p,
                 None => {
+                    self.order_store.insert(&resting)?;
                     return self.emit_rejection(
                         RejectionError::PriceBookInvariantViolation,
                     );
                 }
             };
 
-            // Self-trade policy: reject or adjust if aggressor and resting share participant.
             if self.self_trade_policy.violates(incoming, &resting)? {
+                self.order_store.insert(&resting)?;
+                self.price_book.push(
+                    &resting_price,
+                    resting.id,
+                    resting.side,
+                    resting.sequence,
+                );
                 return self.emit_rejection(RejectionError::SelfTrade);
             }
 
-            // Matching policy: if we cannot match (e.g. price), push resting back and stop.
             if !self.matching_policy.can_match(incoming, &resting)? {
-                self.price_book.push(&resting_price, &resting);
+                self.order_store.insert(&resting)?;
+                self.price_book.push(
+                    &resting_price,
+                    resting.id,
+                    resting.side,
+                    resting.sequence,
+                );
                 break;
             }
 
-            // Execute fill: reduce quantities, update or remove resting, emit Trade.
             let traded_qty = incoming.quantity.min(resting.leaves_quantity);
             incoming.quantity -= traded_qty;
             incoming.leaves_quantity = incoming.quantity;
-
             let remaining_qty = resting.leaves_quantity - traded_qty;
 
-            self.order_store.remove(&resting.id)?;
             if remaining_qty > 0 {
-                let updated = Order {
-                    quantity: resting.quantity,
-                    leaves_quantity: remaining_qty,
-                    executed_quantity: resting.executed_quantity + traded_qty,
-                    ..resting.clone()
-                };
-
-                self.order_store.insert(&updated)?;
-                self.price_book.push(&resting_price, &updated);
+                resting.executed_quantity += traded_qty;
+                resting.leaves_quantity = remaining_qty;
+                self.order_store.insert(&resting)?;
+                self.price_book.push(
+                    &resting_price,
+                    resting.id,
+                    resting.side,
+                    resting.sequence,
+                );
             }
 
             self.event_sink.emit(Event::Trade(Trade {
@@ -181,7 +188,12 @@ where
                 TimeInForce::Gtc => {
                     self.order_store.insert(incoming)?;
                     if let Some(price) = incoming.price {
-                        self.price_book.push(&price, incoming);
+                        self.price_book.push(
+                            &price,
+                            incoming.id,
+                            incoming.side,
+                            incoming.sequence,
+                        );
                     }
                     self.event_sink.emit(Event::Accepted(incoming.id))?;
                 }
@@ -268,7 +280,7 @@ where
         // ─── CANCEL: Remove from store and book ───
         // 2. Remove from store (authoritative); then from book (derived).
         let order = self.order_store.remove(&cmd.order_id)?;
-        if self.price_book.remove(&order.id).is_none() {
+        if !self.price_book.remove(&order.id) {
             return self
                 .emit_rejection(RejectionError::PriceBookInvariantViolation);
         }
@@ -300,7 +312,7 @@ where
         // ─── REPLACE: Cancel old order (store and book) ───
         // 3. Remove old from store then book; emit Canceled (replace = cancel + add semantics).
         let old = self.order_store.remove(&cmd.order_id)?;
-        if self.price_book.remove(&old.id).is_none() {
+        if !self.price_book.remove(&old.id) {
             return self
                 .emit_rejection(RejectionError::PriceBookInvariantViolation);
         }
@@ -341,7 +353,7 @@ where
             }
             Err(e) => return Err(e.into()),
         };
-        if self.price_book.remove(&order.id).is_none() {
+        if !self.price_book.remove(&order.id) {
             return self
                 .emit_rejection(RejectionError::PriceBookInvariantViolation);
         }
@@ -378,7 +390,8 @@ where
         self.order_store.remove(&order.id)?;
         self.price_book.remove(&order.id);
         self.order_store.insert(&order)?;
-        self.price_book.push(&price, &order);
+        self.price_book
+            .push(&price, order.id, order.side, order.sequence);
         Ok(())
     }
 
@@ -409,7 +422,8 @@ where
             self.order_store.remove(&order.id)?;
             self.price_book.remove(&order.id);
             self.order_store.insert(&order)?;
-            self.price_book.push(&price, &order);
+            self.price_book
+                .push(&price, order.id, order.side, order.sequence);
         }
         Ok(())
     }
@@ -430,7 +444,7 @@ where
             }
             Err(e) => return Err(e.into()),
         };
-        if self.price_book.remove(&old.id).is_none() {
+        if !self.price_book.remove(&old.id) {
             return self
                 .emit_rejection(RejectionError::PriceBookInvariantViolation);
         }
@@ -634,10 +648,12 @@ mod tests {
             executed_quantity: 0,
             ..Order::default()
         };
-        book.expect_pop_best()
-            .return_once(move |_| Some(order_no_price));
-        book.expect_push().returning(|_, _| {});
-        let store = MockOrderStore::new();
+        book.expect_pop_best().return_once(|_| Some(1));
+        let mut store = MockOrderStore::new();
+        store
+            .expect_remove()
+            .return_once(move |_| Ok(order_no_price));
+        store.expect_insert().return_once(|_| Ok(()));
         let matching = MockMatchingPolicy::new();
         let mut self_trade = MockSelfTradePolicy::new();
         self_trade.expect_violates().returning(|_, _| Ok(false));
@@ -687,9 +703,9 @@ mod tests {
             executed_quantity: 0,
             ..Order::default()
         };
-        book.expect_pop_best().return_once(move |_| Some(resting));
-        book.expect_push().returning(|_, _| {});
-        let store = MockOrderStore::new();
+        book.expect_pop_best().return_once(|_| Some(1));
+        let mut store = MockOrderStore::new();
+        store.expect_remove().return_once(move |_| Ok(resting));
         let matching = MockMatchingPolicy::new();
         let mut self_trade = MockSelfTradePolicy::new();
         self_trade.expect_violates().return_once(|_, _| {
@@ -737,9 +753,9 @@ mod tests {
             executed_quantity: 0,
             ..Order::default()
         };
-        book.expect_pop_best().return_once(move |_| Some(resting));
-        book.expect_push().returning(|_, _| {});
-        let store = MockOrderStore::new();
+        book.expect_pop_best().return_once(|_| Some(1));
+        let mut store = MockOrderStore::new();
+        store.expect_remove().return_once(move |_| Ok(resting));
         let mut matching = MockMatchingPolicy::new();
         matching
             .expect_can_match()
@@ -775,20 +791,7 @@ mod tests {
         let mut seq = MockSequenceGenerator::new();
         seq.expect_next().returning(|| Ok(0));
         let mut book = MockPriceBook::new();
-        let resting = Order {
-            id: 1,
-            participant_id: 100,
-            side: Side::Sell,
-            order_type: OrderType::Limit,
-            price: Some(50),
-            quantity: 10,
-            time_in_force: TimeInForce::Gtc,
-            sequence: 0,
-            leaves_quantity: 10,
-            executed_quantity: 0,
-            ..Order::default()
-        };
-        book.expect_pop_best().return_once(move |_| Some(resting));
+        book.expect_pop_best().return_once(|_| Some(1));
         let mut store = MockOrderStore::new();
         store
             .expect_remove()
@@ -845,7 +848,7 @@ mod tests {
             let mut c = pop_count.borrow_mut();
             *c += 1;
             if *c == 1 {
-                Some(resting_clone.clone())
+                Some(resting_clone.id)
             } else {
                 None
             }
@@ -903,7 +906,7 @@ mod tests {
         seq.expect_next().return_once(|| Ok(0));
         let mut book = MockPriceBook::new();
         book.expect_pop_best().returning(|_| None);
-        book.expect_push().returning(|_, _| {});
+        book.expect_push().returning(|_, _, _, _| {});
         let mut store = MockOrderStore::new();
         store.expect_insert().returning(|_| Ok(()));
         let matching = MockMatchingPolicy::new();
@@ -978,21 +981,7 @@ mod tests {
     fn cancel_emit_canceled_err() {
         let seq = MockSequenceGenerator::new();
         let mut book = MockPriceBook::new();
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Buy,
-                order_type: OrderType::Limit,
-                price: Some(50),
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
+        book.expect_remove().return_once(|_| true);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1048,7 +1037,7 @@ mod tests {
     fn cancel_book_remove_none_invariant_violation() {
         let seq = MockSequenceGenerator::new();
         let mut book = MockPriceBook::new();
-        book.expect_remove().return_once(|_| None);
+        book.expect_remove().return_once(|_| false);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1144,21 +1133,7 @@ mod tests {
     fn replace_emit_canceled_err() {
         let seq = MockSequenceGenerator::new();
         let mut book = MockPriceBook::new();
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Buy,
-                order_type: OrderType::Limit,
-                price: Some(50),
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
+        book.expect_remove().return_once(|_| true);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1215,7 +1190,7 @@ mod tests {
     fn replace_book_remove_none_invariant_violation() {
         let seq = MockSequenceGenerator::new();
         let mut book = MockPriceBook::new();
-        book.expect_remove().return_once(|_| None);
+        book.expect_remove().return_once(|_| false);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1272,21 +1247,7 @@ mod tests {
     fn replace_sequence_err() {
         let mut seq = MockSequenceGenerator::new();
         let mut book = MockPriceBook::new();
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Buy,
-                order_type: OrderType::Limit,
-                price: Some(50),
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
+        book.expect_remove().return_once(|_| true);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1345,21 +1306,7 @@ mod tests {
         seq.expect_next_at_end_of_queue().return_once(|| Ok(1));
         let mut book = MockPriceBook::new();
         book.expect_pop_best().returning(|_| None);
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Buy,
-                order_type: OrderType::Limit,
-                price: Some(50),
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
+        book.expect_remove().return_once(|_| true);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1419,21 +1366,7 @@ mod tests {
         seq.expect_next_at_end_of_queue().return_once(|| Ok(1));
         let mut book = MockPriceBook::new();
         book.expect_pop_best().returning(|_| None);
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Sell,
-                order_type: OrderType::Market,
-                price: None,
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
+        book.expect_remove().return_once(|_| true);
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {
@@ -1489,22 +1422,8 @@ mod tests {
         seq.expect_next_at_end_of_queue().return_once(|| Ok(1));
         let mut book = MockPriceBook::new();
         book.expect_pop_best().returning(|_| None);
-        book.expect_remove().return_once(|_| {
-            Some(Order {
-                id: 1,
-                participant_id: 100,
-                side: Side::Buy,
-                order_type: OrderType::Limit,
-                price: Some(50),
-                quantity: 10,
-                time_in_force: TimeInForce::Gtc,
-                sequence: 0,
-                leaves_quantity: 10,
-                executed_quantity: 0,
-                ..Order::default()
-            })
-        });
-        book.expect_push().returning(|_, _| {});
+        book.expect_remove().return_once(|_| true);
+        book.expect_push().returning(|_, _, _, _| {});
         let mut store = MockOrderStore::new();
         store.expect_get().return_once(|&id| {
             Some(Order {

@@ -15,11 +15,13 @@ categories = ["network", "messaging", "communication"]
 [dependencies]
 crossbeam-skiplist = "0.1"
 dashmap = "6"
+rayon = { version = "1.10", optional = true }
 thiserror = "2.0"
 
 [features]
 default = ["harness"]
 harness = []
+parallel = ["dep:rayon"]
 
 [lints.rust]
 unsafe_code = "forbid"
@@ -30,6 +32,7 @@ criterion = "0.8"
 mockall = "0.14"
 quickcheck = "1.0"
 quickcheck_macros = "1.1"
+proptest = "1.6"
 rstest = "0.26"
 
 [[bench]]

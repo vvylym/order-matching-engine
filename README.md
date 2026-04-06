@@ -2,192 +2,139 @@
 
 [![CI](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml)
 
-Rust library that matches **limit and market orders** against a **price–time** book: add, cancel, replace, and related commands go through one **`OrderMatchingEngine`** type. Numbers are integers (ticks / lots); there is no `f64` on the hot path.
+Rust library: **limit/market** matching on a **price–time** book. Commands (`add`, `cancel`, `replace`, …) go through **`OrderMatchingEngine`**. Numeric fields use integers (ticks / lots); no `f64` on the hot path.
 
-**Repository:** [github.com/vvylym/order-matching-engine](https://github.com/vvylym/order-matching-engine)  
-**Crate name on crates.io:** `omer` (same as the package in `Cargo.toml`).
-
-If **GitHub’s README looks stale**, compare the **commit on `main`** to your local tree — the default branch only changes after a **push** (or merged PR).
+**Repo:** [github.com/vvylym/order-matching-engine](https://github.com/vvylym/order-matching-engine) · **crate:** `omer`
 
 ---
 
-## Performance roadmap (matching hot path → 1B+ ops/s in-process)
+## Installation
 
-Roadmap for **CPU-bound** add/cancel/match work (no sockets). **1B+ ops/s** here means the **matcher + book** sustaining that aggregate rate on suitable hardware (many cores, batching, sharding — see Phase 4), not a single `localhost` TCP loop.
+Add to your `Cargo.toml`:
 
-### Phase 1 (week 1–2) — book structure + first throughput band
+```toml
+[dependencies]
+omer = "0.1"
+```
 
-- [x] Add **`dashmap`** dependency  
-- [x] Per-side book: **`DashMap<Price, Vec<Order>>`** for level queues + **`SkipMap<Price, ()>`** for best bid / best ask  
-- [x] **`DashSkipOrderBook`** in [`src/book/service/dash_skip.rs`](src/book/service/dash_skip.rs) (implements [`PriceBook`](src/book/mod.rs))  
-- [x] Benchmark **`throughput_book`** — target **~200–300M pushes/sec** on strong CPUs (run locally; record CPU + `rustc -V`)  
-- [x] **`latency_add`** compares **InMemory**, **BTree**, **PoolLevel**, **DashSkip** behind the same harness ([`benches/latency_add.rs`](benches/latency_add.rs))  
+Optional: **`parallel`** (pulls in `rayon` for read-mostly helpers):
 
-### Phase 2 (week 2–3) — pooling + parallel batches
+```toml
+omer = { version = "0.1", features = ["parallel"] }
+```
 
-- [ ] **`OrderPool`** / arena for resting `Order` payloads (reduce `clone` pressure on book levels)  
-- [x] **Batch API:** [`OrderMatchingEngine::process_batch`](src/engine/service.rs) (`OrderCommand` iterator; commits in order, stops on first error)  
-- [ ] **`rayon`** (optional feature) for **sharded** or read-mostly paths — single-writer book stays serial  
-- [x] Engine throughput bench **[`throughput_engine`](benches/throughput_engine.rs)** — warm book + **`process_batch`** of 512 resting adds, **four** `PriceBook` backends, **`NoOpEventSink`**; local target band **~300–500M adds/sec** class on big cores (measure; not CI-gated)  
+Omit default harness for library-only use:
 
-### Phase 3 (week 3–4) — order-type specialization
-
-- [x] Rich **`Order`** / TIF types (already in crate)  
-- [ ] **`OrderBehavior`**, trait-based or enum-dispatched fast paths per order type  
-- [ ] Benches **per order type**; **no regression** vs baseline commits  
-
-### Phase 4 (week 4–5) — sharding + micro-architecture
-
-- [ ] **`ShardedOrderBook`** (partition by price / symbol)  
-- [ ] **SIMD** helpers where profiling proves they win  
-- [ ] **CPU affinity** / pinning notes or cfg for deployment  
-- [ ] Benchmark band **~500M–1B+ ops/sec** aggregate in-process; **perf / flamegraph** workflow documented in this README (see **Profiling**); backlog in [`benches/PLAN.md`](benches/PLAN.md)  
+```toml
+omer = { version = "0.1", default-features = false }
+```
 
 ---
 
-## What you get today
+## Usage
 
-| Area | Status |
-|------|--------|
-| **Matching** | Single-symbol engine: limit/market, partial fills, IOC/GTC and related TIF, replace, cancel-by-id, reduce, execute (see `OrderCommand` in [`src/engine/models.rs`](src/engine/models.rs)). |
-| **Storage / book** | **`PriceBook`** + **`OrderStore`**: `BTreeOrderBook`, **`DashSkipOrderBook`** (DashMap + SkipMap, Phase 1), `PoolLevelOrderBook`, `dense` / `hash_map` stores. |
-| **ITCH** | NASDAQ ITCH-style **binary messages** can be read from a stream and turned into engine commands (`src/itch/`). |
-| **Tests** | Integration tests under [`tests/`](tests/) (semantics, replay, self-trade, stress/property checks). CI runs them on every push/PR. |
-| **Coverage** | CI fails if **line** coverage (llvm-cov) falls **below 85%** — see [`scripts/coverage.sh`](scripts/coverage.sh). |
+```rust
+use omer::engine::{OrderMatchingService, OrderCommand};
+use omer::harness::{add_cmd, engine_with_memory};
+use omer::types::{OrderType, Side, TimeInForce};
+
+let (mut engine, _sink) = engine_with_memory();
+let cmd = OrderCommand::Add(add_cmd(
+    1,
+    100,
+    Side::Buy,
+    OrderType::Limit,
+    Some(50),
+    10,
+    TimeInForce::Gtc,
+));
+engine.process(cmd).expect("accepted");
+```
+
+See [`tests/`](tests/) and [`src/engine/models.rs`](src/engine/models.rs) for the full command set.
 
 ---
 
-## Requirements
+## Repository layout
 
-- **Rust:** stable toolchain (same as CI; edition 2024 in `Cargo.toml`).
-- **Optional:** [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) locally to match the coverage job.
+| Path | Role |
+|------|------|
+| [`src/lib.rs`](src/lib.rs) | Crate root; module overview |
+| [`src/types.rs`](src/types.rs) | `Order`, `Price`, `Quantity`, sides, TIF |
+| [`src/engine/`](src/engine/) | `OrderMatchingService`, `OrderMatchingEngine`, commands |
+| [`src/book/`](src/book/) | [`PriceBook`](src/book/mod.rs) trait + implementations |
+| [`src/store/`](src/store/) | [`OrderStore`](src/store/mod.rs) trait + implementations |
+| [`src/events/`](src/events/) | `Event`, `EventSink`, `NoOpEventSink` |
+| [`src/matching/`](src/matching/), [`src/self_trade/`](src/self_trade/), [`src/sequence/`](src/sequence/) | Policies and sequence generation |
+| [`src/itch/`](src/itch/) | ITCH-style decode + streaming entry points |
+| [`src/pool/`](src/pool/mod.rs) | `OrderPool` (reuse `Order` shells outside the engine) |
+| [`src/parallel.rs`](src/parallel.rs) | Optional `rayon` helper for read-mostly aggregation (feature **`parallel`**) |
+| [`src/harness/`](src/harness/) | Default test/bench wiring (feature **`harness`**, on by default) |
+| [`benches/`](benches/) | Criterion targets (`--no-run` in CI) |
+| [`tests/`](tests/) | Integration and property tests |
+
+Disable harness: `omer = { version = "…", default-features = false }`.
+
+---
+
+## Services (traits) and implementations
+
+| Service | Trait | Concrete types |
+|---------|--------|----------------|
+| Matching entrypoint | [`OrderMatchingService`](src/engine/service.rs) | [`OrderMatchingEngine`](src/engine/service.rs) |
+| Resting book | [`PriceBook`](src/book/mod.rs) | [`BTreeOrderBook`](src/book/service/btree.rs), [`PoolLevelOrderBook`](src/book/service/pool_level.rs), [`DashSkipOrderBook`](src/book/service/dash_skip.rs), [`InMemoryPriceBook`](src/harness/memory.rs) (harness) |
+| Order storage | [`OrderStore`](src/store/mod.rs) | [`HashMapOrderStore`](src/store/service/hash_map.rs), [`DenseOrderStore`](src/store/service/dense.rs), [`InMemoryOrderStore`](src/harness/memory.rs) |
+
+**Resting layout (important):** the book keeps **`OrderId` queues per price**; the **canonical [`Order`] payload** lives only in **`OrderStore`**. `PriceBook::push` takes `order_id`, `side`, and a **`time_priority`** (`Sequence`) so the in-memory test book can respect time priority; FIFO backends ignore that field.
+
+**Pooling:** [`OrderPool`](src/pool/mod.rs) recycles `Order` structs for adapters and gateways (not required for core matching).
+
+**Parallel reads:** enable `parallel` and use [`parallel::par_best_quotes`](src/parallel.rs) to aggregate best bid/ask over many books in parallel; matching remains single-writer per book.
+
+---
+
+## Benchmarks (what they measure)
+
+| Bench | Command | What it does |
+|-------|---------|----------------|
+| `throughput_engine` | `cargo bench -p omer --bench throughput_engine` | Warm book + `process_batch` (512 GTC buys), **four** `PriceBook` backends, `NoOpEventSink` |
+| `latency_add` | `cargo bench -p omer --bench latency_add` | One resting `add` per iteration, same four backends, collecting sink |
+| `throughput_book` | `cargo bench -p omer --bench throughput_book` | `DashSkipOrderBook::push` only (ids; no engine) |
+| `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on AddOrder buffer |
+| `micro`, `matching_engine`, `market_manager` | same pattern | Smoke / placeholder loops; see [`benches/PLAN.md`](benches/PLAN.md) |
+
+CI compiles all benches with `cargo bench --no-run --workspace --all-features` but does not report Criterion output.
+
+---
+
+## Profiling (engine hot path)
+
+Release build, pinned CPU, frame pointers:
+
+```bash
+export RUSTFLAGS="-C force-frame-pointers=yes"
+cargo flamegraph --bench throughput_engine --features harness -- --bench
+```
+
+Alternatives: `perf record` + flame graph tooling (see earlier commits or team runbooks). Attach machine type, `rustc -V`, and git SHA with any numbers.
 
 ---
 
 ## Quick start
 
-Clone the repo, then from the crate root:
-
 ```bash
 cargo test --all-features --all-targets
-```
-
-Run the linter the same way CI does:
-
-```bash
 cargo clippy --workspace --all-targets --all-features -- -D warnings
-```
-
-CI also runs **`cargo fmt --all -- --check`**. Format before pushing:
-
-```bash
 cargo fmt --all
 ```
 
-Line coverage (after installing `cargo-llvm-cov`):
-
-```bash
-chmod +x scripts/coverage.sh
-./scripts/coverage.sh
-```
+Coverage (optional): [`scripts/coverage.sh`](scripts/coverage.sh) (CI enforces line coverage threshold).
 
 ---
 
-## How the crate is organized
+## Contributing and quality gates
 
-Read top-down:
-
-1. **[`src/lib.rs`](src/lib.rs)** — short overview of modules (crate docs).
-2. **[`src/engine/`](src/engine/)** — **`OrderMatchingService`** trait and **`OrderMatchingEngine`** implementation.
-3. **[`src/types.rs`](src/types.rs)** — **`Order`**, prices, quantities, sides, TIF.
-4. **`src/book/`, `src/store/`** — traits plus concrete services.
-5. **`src/itch/`** — wire layout + streaming entry points.
-6. **`src/harness/`** (feature **`harness`**, **on by default**) — shared store, policies, and event sink; pick the book with **`engine_with_book`** / **`engine_with_*`**. Use **`engine_with_book_noop`** when benchmarks must not allocate on **`Event::Accepted`**. Omit harness: `omer = { version = "…", default-features = false }`.
-
----
-
-## Benchmarks and performance (today)
-
-| Bench | What it does right now |
-|-------|-------------------------|
-| **`latency_add`** | Same harness, **four `PriceBook` backends** (in-memory B-tree levels, `BTreeOrderBook`, `PoolLevelOrderBook`, `DashSkipOrderBook`): one resting buy `add` per iter. Run: `cargo bench -p omer --bench latency_add`. |
-| **`throughput_book`** | **`PriceBook::push`** on **`DashSkipOrderBook`**: same-price FIFO vs distinct-price levels (50k ops/iter). Run: `cargo bench -p omer --bench throughput_book`. |
-| **`throughput_engine`** | Warmed engine + **`process_batch`** (512 resting limit buys), **four** book backends, **`NoOpEventSink`**. Run: `cargo bench -p omer --bench throughput_engine`. |
-| **`itch_parse`** | **`scan_decode_book_messages`** on a buffer of **AddOrder** packets (decode only). Run: `cargo bench -p omer --bench itch_parse`. |
-| **`micro`**, **`market_manager`**, **`matching_engine`** | **Placeholder** loops so `cargo bench --no-run` keeps targets building; see [`benches/PLAN.md`](benches/PLAN.md). |
-
-### Benchmark methodology (engine vs book)
-
-| Target | Bench | Notes |
-|--------|--------|--------|
-| **End-to-end add + book + store** (no event alloc) | [`throughput_engine`](benches/throughput_engine.rs) | 4096-order warm-up, then **`process_batch`** of **512** GTC limit buys per sample; **`NoOpEventSink`**. Compare **`inmemory_price_book`**, **`btree_order_book`**, **`pool_level_book`**, **`dash_skip_book`**. |
-| **Single `add` latency** | [`latency_add`](benches/latency_add.rs) | Same four backends; **`CollectingEventSink`**. |
-| **Raw push into book** | [`throughput_book`](benches/throughput_book.rs) | **`DashSkipOrderBook::push` only** (no engine). |
-| **ITCH decode only** | [`itch_parse`](benches/itch_parse.rs) | **`scan_decode_book_messages`** on AddOrder buffer. |
-
-**Fastest engine implementation (today):** run the throughput bench and compare the four lines under **`throughput_engine_hot_batch`**. On typical Linux/x86_64 servers we expect **`dash_skip_book`** or **`pool_level_book`** to lead for batched resting adds—**your CPU and `rustc` version decide**. Treat **`DashSkipOrderBook`** as the primary **Phase 1** structure for sustained engine throughput until sharding lands; re-check after every book change.
-
-**North star:** **10⁹+ in-process operations per second** on the **matcher + book** path is a **program target** (sharding, batching, SIMD, cores — Phase 4), not something a single-threaded integration test proves. Network I/O is out of scope for that number: measure **decode**, **book/engine**, and (later) **gateway** separately. Always record hardware and `rustc` with published figures.
-
-**Pull request CI** compiles all benches but **does not** run long or distributed load tests (keeps feedback fast). If you run heavy benchmarks locally, record machine, git revision, and command in the PR text when you report numbers.
-
-**Safety:** `unsafe` is **forbidden** at crate level unless a future change adds a **small**, reviewed block with an explicit `// SAFETY:` note.
-
----
-
-### Profiling with `perf` and flamegraph (fastest engine backend)
-
-Use **release** builds and **one pinned CPU** so numbers are stable. Profile the binary that exercises the winning backend from **`throughput_engine`** (below we use the **`throughput_engine`** bench; pick **`dash_skip_book`** once confirmed on your machine).
-
-**1. Dependencies (Debian/Ubuntu examples)**
-
-```bash
-sudo apt install linux-tools-common linux-tools-$(uname -r)  # perf
-cargo install flamegraph   # optional; wraps perf + stack collapse
-```
-
-**2. Frame pointers (clearer stacks)**
-
-```bash
-export RUSTFLAGS="-C force-frame-pointers=yes"
-```
-
-**3. Option A — `cargo flamegraph` (simplest)**
-
-From the crate root:
-
-```bash
-cargo flamegraph --bench throughput_engine -- \
-  --bench
-```
-
-Open `flamegraph.svg` in a browser. You should see hot frames in **`process_batch` → `add` → `match_and_commit_incoming` → `PriceBook::push`** and related book/store paths.
-
-**4. Option B — `perf` record + `inferno-flamegraph` (manual)**
-
-```bash
-cargo build --release --bench throughput_engine
-# The exact binary name includes a hash; use tab completion:
-PERF=/usr/lib/linux-tools/$(uname -r)/perf   # adjust if perf lives elsewhere
-$PERF record -F 997 -g --call-graph dwarf -- \
-  target/release/deps/throughput_engine-* --bench
-$PERF script | inferno-collapse-perf | inferno-flamegraph > engine.svg
-```
-
-**5. Good practices**
-
-- Run **`echo performance \| sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`** only if you control the host and want stable frequency.
-- Pin the process: **`taskset -c 0 cargo flamegraph ...`**.
-- For **LBR** or **Intel PT**, use vendor-specific `perf` guides; dwarf stacks above work on most CI-like VMs.
-- Attach **`perf report -g graph`** screenshots or **`engine.svg`** to perf PRs when claiming regressions or wins.
-
-See [`benches/PLAN.md`](benches/PLAN.md) for the long-term bench backlog; this section is the **operational** recipe for the current fastest **`PriceBook` + engine** combo.
-
----
-
-## Contributing
-
-Issues and PRs are welcome. Match **existing style** (formatting, `clippy -D warnings`, tests). Use **conventional commits** if you can (`feat:`, `fix:`, `docs:`, …). For larger changes, open an issue first so direction matches maintainers’ expectations.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md): **issue → branch → incremental commits → PR → review**. Use `make ci` to mirror CI and `make quality-gate` for the default [`pmat`](https://crates.io/crates/pmat) profile.
 
 ---
 
