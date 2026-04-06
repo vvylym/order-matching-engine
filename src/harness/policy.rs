@@ -1,10 +1,12 @@
-//! Matching and self-trade policies for tests.
+#![allow(missing_docs)]
 
-use omer::matching::{MatchingPolicy, MatchingPolicyError};
-use omer::self_trade::{SelfTradePolicy, SelfTradePolicyError};
-use omer::types::Order;
+//! Matching and self-trade policies for harness tests and benches.
 
-/// Matching policy: can match when prices cross (buy price >= ask, sell price <= bid).
+use crate::matching::{MatchingPolicy, MatchingPolicyError};
+use crate::self_trade::{SelfTradePolicy, SelfTradePolicyError};
+use crate::types::Order;
+
+/// Matching when prices cross (incl. market aggressor vs limit resting).
 pub struct CrossingMatchingPolicy;
 
 impl MatchingPolicy for CrossingMatchingPolicy {
@@ -15,17 +17,14 @@ impl MatchingPolicy for CrossingMatchingPolicy {
     ) -> Result<bool, MatchingPolicyError> {
         let (in_price, rest_price) = match (incoming.price, resting.price) {
             (Some(ip), Some(rp)) => (ip, rp),
-            (None, Some(_rp)) => {
-                // Market order: always crosses resting limit
-                return Ok(true);
-            }
+            (None, Some(_)) => return Ok(true),
             _ => return Err(MatchingPolicyError::UndefinedMarketPrice),
         };
         let crosses = match (incoming.side, resting.side) {
-            (omer::types::Side::Buy, omer::types::Side::Sell) => {
+            (crate::types::Side::Buy, crate::types::Side::Sell) => {
                 in_price >= rest_price
             }
-            (omer::types::Side::Sell, omer::types::Side::Buy) => {
+            (crate::types::Side::Sell, crate::types::Side::Buy) => {
                 in_price <= rest_price
             }
             _ => return Err(MatchingPolicyError::IncompatibleSides),
@@ -34,7 +33,6 @@ impl MatchingPolicy for CrossingMatchingPolicy {
     }
 }
 
-/// Self-trade policy that never blocks (for tests that don't care about self-trade).
 #[allow(dead_code)]
 pub struct AllowSelfTradePolicy;
 
@@ -48,7 +46,6 @@ impl SelfTradePolicy for AllowSelfTradePolicy {
     }
 }
 
-/// Self-trade policy that rejects when same participant (for VII tests).
 #[allow(dead_code)]
 pub struct RejectSelfTradePolicy;
 

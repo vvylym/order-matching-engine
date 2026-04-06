@@ -1,13 +1,15 @@
-//! Event sink that collects events for test assertions.
+#![allow(missing_docs)]
+#![allow(clippy::type_complexity)]
 
-use omer::events::{Event, EventSink, EventSinkError};
+//! In-memory event sink for harness tests and benches.
+
+use crate::events::{Event, EventSink, EventSinkError};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Shared event buffer (reduces type complexity for clippy).
 type EventBuffer = Rc<RefCell<Vec<Event>>>;
 
-/// Sink that appends all events to a shared buffer (cloneable for test access).
+/// Sink that appends all events to a shared buffer (cloneable).
 #[derive(Clone)]
 pub struct CollectingEventSink {
     events: EventBuffer,
@@ -31,7 +33,6 @@ impl CollectingEventSink {
         self.events.borrow()
     }
 
-    /// Clear collected events (test helper).
     #[allow(dead_code)]
     pub fn clear(&self) {
         self.events.borrow_mut().clear();

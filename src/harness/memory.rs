@@ -1,17 +1,16 @@
-//! In-memory implementations of PriceBook and OrderStore for integration tests.
+#![allow(missing_docs)]
 
-use omer::book::PriceBook;
-use omer::store::OrderStore;
-use omer::store::OrderStoreError;
-use omer::types::{Order, OrderId, Price, Quantity, Side};
+//! In-memory book and store for harness tests and benches.
+
+use crate::book::PriceBook;
+use crate::store::{OrderStore, OrderStoreError};
+use crate::types::{Order, OrderId, Price, Quantity, Side};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::rc::Rc;
 
-/// One price level: FIFO queue of orders (reduces type complexity for clippy).
 type PriceLevel = BTreeMap<Price, VecDeque<Order>>;
 
-/// In-memory price book: price-time priority (FIFO per level).
 #[derive(Default)]
 pub struct InMemoryPriceBook {
     bids: PriceLevel,
@@ -32,7 +31,6 @@ impl InMemoryPriceBook {
         }
     }
 
-    /// Pop the order with the smallest sequence at the best price (price-time priority).
     fn pop_best_side(
         side: Side,
         bids: &mut PriceLevel,
@@ -116,7 +114,6 @@ impl PriceBook for InMemoryPriceBook {
     }
 }
 
-/// In-memory order store.
 #[derive(Default)]
 pub struct InMemoryOrderStore {
     orders: HashMap<OrderId, Order>,
@@ -143,7 +140,6 @@ impl OrderStore for InMemoryOrderStore {
 }
 
 impl InMemoryPriceBook {
-    /// Total quantity resting in the book (for VIII.2).
     #[allow(dead_code)]
     pub fn total_depth(&self) -> Quantity {
         let bid_qty: Quantity = self
@@ -162,48 +158,44 @@ impl InMemoryPriceBook {
     }
 }
 
-/// Shared handle to an in-memory book so tests can inspect state after engine runs.
 #[allow(dead_code)]
 pub type SharedPriceBook = Rc<RefCell<InMemoryPriceBook>>;
 
-/// Wrapper that implements PriceBook and delegates to shared inner book.
 #[allow(dead_code)]
 pub struct SharedPriceBookHandle(pub SharedPriceBook);
 
 impl PriceBook for SharedPriceBookHandle {
     fn best_bid(&self) -> Option<Price> {
-        omer::book::PriceBook::best_bid(&*self.0.borrow())
+        PriceBook::best_bid(&*self.0.borrow())
     }
     fn best_ask(&self) -> Option<Price> {
-        omer::book::PriceBook::best_ask(&*self.0.borrow())
+        PriceBook::best_ask(&*self.0.borrow())
     }
     fn push(&mut self, price: &Price, order: &Order) {
-        omer::book::PriceBook::push(&mut *self.0.borrow_mut(), price, order)
+        PriceBook::push(&mut *self.0.borrow_mut(), price, order)
     }
     fn pop_best(&mut self, side: Side) -> Option<Order> {
-        omer::book::PriceBook::pop_best(&mut *self.0.borrow_mut(), side)
+        PriceBook::pop_best(&mut *self.0.borrow_mut(), side)
     }
     fn remove(&mut self, order_id: &OrderId) -> Option<Order> {
-        omer::book::PriceBook::remove(&mut *self.0.borrow_mut(), order_id)
+        PriceBook::remove(&mut *self.0.borrow_mut(), order_id)
     }
 }
 
-/// Shared handle to an in-memory store for test inspection.
 #[allow(dead_code)]
 pub type SharedOrderStore = Rc<RefCell<InMemoryOrderStore>>;
 
-/// Wrapper that implements OrderStore and delegates to shared inner store.
 #[allow(dead_code)]
 pub struct SharedOrderStoreHandle(pub SharedOrderStore);
 
 impl OrderStore for SharedOrderStoreHandle {
     fn insert(&mut self, order: &Order) -> Result<(), OrderStoreError> {
-        omer::store::OrderStore::insert(&mut *self.0.borrow_mut(), order)
+        OrderStore::insert(&mut *self.0.borrow_mut(), order)
     }
     fn remove(&mut self, order_id: &OrderId) -> Result<Order, OrderStoreError> {
-        omer::store::OrderStore::remove(&mut *self.0.borrow_mut(), order_id)
+        OrderStore::remove(&mut *self.0.borrow_mut(), order_id)
     }
     fn get(&self, order_id: &OrderId) -> Option<Order> {
-        omer::store::OrderStore::get(&*self.0.borrow(), order_id)
+        OrderStore::get(&*self.0.borrow(), order_id)
     }
 }
