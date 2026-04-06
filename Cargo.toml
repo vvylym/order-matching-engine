@@ -20,4 +20,24 @@ unsafe_code = "forbid"
 missing_docs = "deny"
 
 [dev-dependencies]
+criterion = "0.8"
 mockall = "0.14"
+quickcheck = "1.0"
+quickcheck_macros = "1.1"
+rstest = "0.26"
+
+[[bench]]
+name = "itch_parse"
+harness = false
+
+[[bench]]
+name = "market_manager"
+harness = false
+
+[[bench]]
+name = "matching_engine"
+harness = false
+
+[[bench]]
+name = "micro"
+harness = false
