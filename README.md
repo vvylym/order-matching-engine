@@ -41,7 +41,7 @@ Roadmap for **CPU-bound** add/cancel/match work (no sockets). **1B+ ops/s** here
 - [ ] **`ShardedOrderBook`** (partition by price / symbol)  
 - [ ] **SIMD** helpers where profiling proves they win  
 - [ ] **CPU affinity** / pinning notes or cfg for deployment  
-- [ ] Benchmark band **~500M–1B+ ops/sec** aggregate in-process; **perf / flamegraph** in [`benches/PLAN.md`](benches/PLAN.md)  
+- [ ] Benchmark band **~500M–1B+ ops/sec** aggregate in-process; **perf / flamegraph** workflow documented in this README (see **Profiling**); backlog in [`benches/PLAN.md`](benches/PLAN.md)  
 
 ---
 
@@ -78,6 +78,12 @@ Run the linter the same way CI does:
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
 
+CI also runs **`cargo fmt --all -- --check`**. Format before pushing:
+
+```bash
+cargo fmt --all
+```
+
 Line coverage (after installing `cargo-llvm-cov`):
 
 ```bash
@@ -110,11 +116,72 @@ Read top-down:
 | **`itch_parse`** | **`scan_decode_book_messages`** on a buffer of **AddOrder** packets (decode only). Run: `cargo bench -p omer --bench itch_parse`. |
 | **`micro`**, **`market_manager`**, **`matching_engine`** | **Placeholder** loops so `cargo bench --no-run` keeps targets building; see [`benches/PLAN.md`](benches/PLAN.md). |
 
+### Benchmark methodology (engine vs book)
+
+| Target | Bench | Notes |
+|--------|--------|--------|
+| **End-to-end add + book + store** (no event alloc) | [`throughput_engine`](benches/throughput_engine.rs) | 4096-order warm-up, then **`process_batch`** of **512** GTC limit buys per sample; **`NoOpEventSink`**. Compare **`inmemory_price_book`**, **`btree_order_book`**, **`pool_level_book`**, **`dash_skip_book`**. |
+| **Single `add` latency** | [`latency_add`](benches/latency_add.rs) | Same four backends; **`CollectingEventSink`**. |
+| **Raw push into book** | [`throughput_book`](benches/throughput_book.rs) | **`DashSkipOrderBook::push` only** (no engine). |
+| **ITCH decode only** | [`itch_parse`](benches/itch_parse.rs) | **`scan_decode_book_messages`** on AddOrder buffer. |
+
+**Fastest engine implementation (today):** run the throughput bench and compare the four lines under **`throughput_engine_hot_batch`**. On typical Linux/x86_64 servers we expect **`dash_skip_book`** or **`pool_level_book`** to lead for batched resting adds—**your CPU and `rustc` version decide**. Treat **`DashSkipOrderBook`** as the primary **Phase 1** structure for sustained engine throughput until sharding lands; re-check after every book change.
+
 **North star:** **10⁹+ in-process operations per second** on the **matcher + book** path is a **program target** (sharding, batching, SIMD, cores — Phase 4), not something a single-threaded integration test proves. Network I/O is out of scope for that number: measure **decode**, **book/engine**, and (later) **gateway** separately. Always record hardware and `rustc` with published figures.
 
 **Pull request CI** compiles all benches but **does not** run long or distributed load tests (keeps feedback fast). If you run heavy benchmarks locally, record machine, git revision, and command in the PR text when you report numbers.
 
 **Safety:** `unsafe` is **forbidden** at crate level unless a future change adds a **small**, reviewed block with an explicit `// SAFETY:` note.
+
+---
+
+### Profiling with `perf` and flamegraph (fastest engine backend)
+
+Use **release** builds and **one pinned CPU** so numbers are stable. Profile the binary that exercises the winning backend from **`throughput_engine`** (below we use the **`throughput_engine`** bench; pick **`dash_skip_book`** once confirmed on your machine).
+
+**1. Dependencies (Debian/Ubuntu examples)**
+
+```bash
+sudo apt install linux-tools-common linux-tools-$(uname -r)  # perf
+cargo install flamegraph   # optional; wraps perf + stack collapse
+```
+
+**2. Frame pointers (clearer stacks)**
+
+```bash
+export RUSTFLAGS="-C force-frame-pointers=yes"
+```
+
+**3. Option A — `cargo flamegraph` (simplest)**
+
+From the crate root:
+
+```bash
+cargo flamegraph --bench throughput_engine -- \
+  --bench
+```
+
+Open `flamegraph.svg` in a browser. You should see hot frames in **`process_batch` → `add` → `match_and_commit_incoming` → `PriceBook::push`** and related book/store paths.
+
+**4. Option B — `perf` record + `inferno-flamegraph` (manual)**
+
+```bash
+cargo build --release --bench throughput_engine
+# The exact binary name includes a hash; use tab completion:
+PERF=/usr/lib/linux-tools/$(uname -r)/perf   # adjust if perf lives elsewhere
+$PERF record -F 997 -g --call-graph dwarf -- \
+  target/release/deps/throughput_engine-* --bench
+$PERF script | inferno-collapse-perf | inferno-flamegraph > engine.svg
+```
+
+**5. Good practices**
+
+- Run **`echo performance \| sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor`** only if you control the host and want stable frequency.
+- Pin the process: **`taskset -c 0 cargo flamegraph ...`**.
+- For **LBR** or **Intel PT**, use vendor-specific `perf` guides; dwarf stacks above work on most CI-like VMs.
+- Attach **`perf report -g graph`** screenshots or **`engine.svg`** to perf PRs when claiming regressions or wins.
+
+See [`benches/PLAN.md`](benches/PLAN.md) for the long-term bench backlog; this section is the **operational** recipe for the current fastest **`PriceBook` + engine** combo.
 
 ---
 

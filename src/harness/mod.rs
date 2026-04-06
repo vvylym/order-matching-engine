@@ -24,8 +24,10 @@ pub use sink::CollectingEventSink;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::book::service::{BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook};
 use crate::book::PriceBook;
+use crate::book::service::{
+    BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook,
+};
 use crate::engine::OrderMatchingEngine;
 use crate::events::{Event, NoOpEventSink};
 use crate::sequence::SequenceGenerator;
@@ -129,8 +131,8 @@ pub fn engine_with_self_trade_rejection()
 }
 
 /// Build an engine with the given **`PriceBook`** implementation (same store, policies, sink).
-pub fn engine_with_book<PB: PriceBook + Default>(
-) -> (EngineWithBook<PB>, CollectingEventSink) {
+pub fn engine_with_book<PB: PriceBook + Default>()
+-> (EngineWithBook<PB>, CollectingEventSink) {
     let seq = IncrementalSequence::default();
     let book = PB::default();
     let store = InMemoryOrderStore::default();
@@ -148,24 +150,26 @@ pub fn engine_with_memory() -> (EngineWithMemory, CollectingEventSink) {
 }
 
 /// [`BTreeOrderBook`]: B-tree levels + order-index removes.
-pub fn engine_with_btree_book() -> (EngineWithBook<BTreeOrderBook>, CollectingEventSink) {
+pub fn engine_with_btree_book()
+-> (EngineWithBook<BTreeOrderBook>, CollectingEventSink) {
     engine_with_book::<BTreeOrderBook>()
 }
 
 /// [`PoolLevelOrderBook`]: signed-price level pool.
-pub fn engine_with_pool_level_book(
-) -> (EngineWithBook<PoolLevelOrderBook>, CollectingEventSink) {
+pub fn engine_with_pool_level_book()
+-> (EngineWithBook<PoolLevelOrderBook>, CollectingEventSink) {
     engine_with_book::<PoolLevelOrderBook>()
 }
 
 /// [`DashSkipOrderBook`]: DashMap levels + SkipMap best price (Phase 1 path).
-pub fn engine_with_dash_skip_book(
-) -> (EngineWithBook<DashSkipOrderBook>, CollectingEventSink) {
+pub fn engine_with_dash_skip_book()
+-> (EngineWithBook<DashSkipOrderBook>, CollectingEventSink) {
     engine_with_book::<DashSkipOrderBook>()
 }
 
 /// Engine with **`NoOpEventSink`** (see [`EngineWithBookNoOp`]).
-pub fn engine_with_book_noop<PB: PriceBook + Default>() -> EngineWithBookNoOp<PB> {
+pub fn engine_with_book_noop<PB: PriceBook + Default>() -> EngineWithBookNoOp<PB>
+{
     let seq = IncrementalSequence::default();
     let book = PB::default();
     let store = InMemoryOrderStore::default();

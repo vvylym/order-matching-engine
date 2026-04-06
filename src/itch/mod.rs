@@ -11,7 +11,8 @@ mod stream;
 mod wire;
 
 pub use stream::{
-    decode_book_message, process_itch_bytes, process_itch_stream, scan_decode_book_messages,
+    decode_book_message, process_itch_bytes, process_itch_stream,
+    scan_decode_book_messages,
 };
 pub use wire::{BuySell, Oid, StockLocate, Timestamp, WirePrice, WireQty};
 

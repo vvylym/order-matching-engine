@@ -39,7 +39,9 @@ fn is_book_affecting(msg_type: ItchMsgType) -> bool {
 
 /// Read the 2-byte length + 1-byte message type and validate `wire_len` vs fixed ITCH size.
 #[inline]
-pub(crate) fn read_itch_header(data: &[u8]) -> std::result::Result<ItchFrameHeader, FeedError> {
+pub(crate) fn read_itch_header(
+    data: &[u8],
+) -> std::result::Result<ItchFrameHeader, FeedError> {
     if data.len() < 3 {
         return Err(FeedError::Parse {
             required: 3,
@@ -66,7 +68,9 @@ fn apply_itch_payload<E: OrderMatchingService>(
 ) -> Result<()> {
     if is_book_affecting(msg_type) {
         *npkts += 1;
-        if let Some(cmd) = decode_book_message(msg_type, payload).map_err(Error::from)? {
+        if let Some(cmd) =
+            decode_book_message(msg_type, payload).map_err(Error::from)?
+        {
             engine.process(cmd)?;
         }
     }
@@ -76,20 +80,21 @@ fn apply_itch_payload<E: OrderMatchingService>(
 /// Process a contiguous byte slice of ITCH packets (each: u16 length BE, u8 type, payload).
 /// Used for tests, replay buffers, and decode throughput benches (avoids `Read` overhead).
 /// Returns the number of book-affecting messages processed.
-pub fn process_itch_bytes<E: OrderMatchingService>(data: &[u8], engine: &mut E) -> Result<u64> {
+pub fn process_itch_bytes<E: OrderMatchingService>(
+    data: &[u8],
+    engine: &mut E,
+) -> Result<u64> {
     let mut i = 0usize;
     let mut npkts: u64 = 0;
     while i < data.len() {
         let rest = &data[i..];
         let (msg_type, total) = read_itch_header(rest).map_err(Error::from)?;
         if rest.len() < total {
-            return Err(
-                FeedError::Parse {
-                    required: total,
-                    got: rest.len(),
-                }
-                .into(),
-            );
+            return Err(FeedError::Parse {
+                required: total,
+                got: rest.len(),
+            }
+            .into());
         }
         let payload = &rest[3..total];
         apply_itch_payload(msg_type, payload, engine, &mut npkts)?;
@@ -100,7 +105,9 @@ pub fn process_itch_bytes<E: OrderMatchingService>(data: &[u8], engine: &mut E) 
 
 /// Walk ITCH packets and fully decode every book-affecting payload (no engine).
 /// For benchmarking parse throughput and for regressions on the decode hot path.
-pub fn scan_decode_book_messages(data: &[u8]) -> std::result::Result<u64, FeedError> {
+pub fn scan_decode_book_messages(
+    data: &[u8],
+) -> std::result::Result<u64, FeedError> {
     let mut i = 0usize;
     let mut book_count: u64 = 0;
     while i < data.len() {
@@ -246,8 +253,8 @@ mod tests {
 
     use crate::book::service::BTreeOrderBook;
     use crate::engine::{OrderCommand, OrderMatchingEngine};
-    use crate::events::NoOpEventSink;
     use crate::error::FeedError;
+    use crate::events::NoOpEventSink;
     use crate::itch::message_len;
     use crate::itch::messages::ItchMsgType;
     use crate::matching::PriceCrossMatchingPolicy;
@@ -256,8 +263,8 @@ mod tests {
     use crate::store::service::HashMapOrderStore;
 
     use super::{
-        decode_book_message, process_itch_bytes, process_itch_stream, read_itch_header,
-        scan_decode_book_messages,
+        decode_book_message, process_itch_bytes, process_itch_stream,
+        read_itch_header, scan_decode_book_messages,
     };
 
     /// One ITCH AddOrder packet: len=36, type='A', payload with oid=1, buy, qty=10, price=10000, stock_locate=0.
@@ -382,8 +389,10 @@ mod tests {
             Some(OrderCommand::ReplaceByNewId(_))
         ));
 
-        assert!(decode_book_message(ItchMsgType::Trade, &[0u8; 44])
-            .unwrap()
-            .is_none());
+        assert!(
+            decode_book_message(ItchMsgType::Trade, &[0u8; 44])
+                .unwrap()
+                .is_none()
+        );
     }
 }

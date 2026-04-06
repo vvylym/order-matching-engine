@@ -3,11 +3,8 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use omer::engine::OrderMatchingService;
 use omer::harness::{
-    add_cmd,
-    engine_with_btree_book,
-    engine_with_dash_skip_book,
-    engine_with_memory,
-    engine_with_pool_level_book,
+    add_cmd, engine_with_btree_book, engine_with_dash_skip_book,
+    engine_with_memory, engine_with_pool_level_book,
 };
 use omer::types::{OrderType, Side, TimeInForce};
 use std::hint::black_box;

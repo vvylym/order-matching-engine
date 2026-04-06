@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::fmt;
 
 use crossbeam_skiplist::SkipMap;
-use dashmap::mapref::entry::Entry as DEntry;
 use dashmap::DashMap;
+use dashmap::mapref::entry::Entry as DEntry;
 
 use crate::book::PriceBook;
 use crate::types::{Order, OrderId, Price, Side};
@@ -62,7 +62,11 @@ impl BookSide {
         Some(order)
     }
 
-    fn remove_order(&mut self, price: Price, order_id: &OrderId) -> Option<Order> {
+    fn remove_order(
+        &mut self,
+        price: Price,
+        order_id: &OrderId,
+    ) -> Option<Order> {
         let mut level = self.levels.get_mut(&price)?;
         let pos = level.iter().position(|o| o.id == *order_id)?;
         let order = level.remove(pos);

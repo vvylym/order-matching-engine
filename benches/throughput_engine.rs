@@ -6,11 +6,11 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use omer::book::service::{BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook};
-use omer::engine::{OrderCommand, OrderMatchingService};
-use omer::harness::{
-    InMemoryPriceBook, add_cmd, engine_with_book_noop,
+use omer::book::service::{
+    BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook,
 };
+use omer::engine::{OrderCommand, OrderMatchingService};
+use omer::harness::{InMemoryPriceBook, add_cmd, engine_with_book_noop};
 use omer::types::{OrderType, Side, TimeInForce};
 
 const WARM_UP: u64 = 4096;

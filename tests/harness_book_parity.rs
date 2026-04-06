@@ -5,8 +5,8 @@
 use omer::engine::OrderMatchingService;
 use omer::events::Event;
 use omer::harness::{
-    add_cmd, engine_with_btree_book, engine_with_dash_skip_book, engine_with_memory,
-    engine_with_pool_level_book,
+    add_cmd, engine_with_btree_book, engine_with_dash_skip_book,
+    engine_with_memory, engine_with_pool_level_book,
 };
 use omer::types::{OrderType, Side, TimeInForce};
 
@@ -46,6 +46,15 @@ macro_rules! harness_marketable_buy_fills_sell {
 }
 
 harness_marketable_buy_fills_sell!(marketable_buy_inmemory, engine_with_memory);
-harness_marketable_buy_fills_sell!(marketable_buy_btree_book, engine_with_btree_book);
-harness_marketable_buy_fills_sell!(marketable_buy_pool_level_book, engine_with_pool_level_book);
-harness_marketable_buy_fills_sell!(marketable_buy_dash_skip_book, engine_with_dash_skip_book);
+harness_marketable_buy_fills_sell!(
+    marketable_buy_btree_book,
+    engine_with_btree_book
+);
+harness_marketable_buy_fills_sell!(
+    marketable_buy_pool_level_book,
+    engine_with_pool_level_book
+);
+harness_marketable_buy_fills_sell!(
+    marketable_buy_dash_skip_book,
+    engine_with_dash_skip_book
+);

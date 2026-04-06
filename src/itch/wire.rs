@@ -147,10 +147,7 @@ mod tests {
         assert_eq!(read_u16_be(&b, 0).unwrap(), 0x0102);
         assert_eq!(read_u32_be(&b, 0).unwrap(), 0x01020304);
         assert_eq!(read_u64_be(&b, 0).unwrap(), 0x0102030405060708);
-        assert_eq!(
-            read_timestamp(&[0, 0, 0, 0, 0, 1][..], 0).unwrap().0,
-            1
-        );
+        assert_eq!(read_timestamp(&[0, 0, 0, 0, 0, 1][..], 0).unwrap().0, 1);
         assert!(read_u32_be(&b, 6).is_err());
         assert!(read_timestamp(&b, 3).is_err());
     }
