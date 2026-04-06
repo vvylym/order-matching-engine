@@ -45,3 +45,8 @@ harness = false
 [[bench]]
 name = "micro"
 harness = false
+
+[[bench]]
+name = "latency_add"
+harness = false
+required-features = ["harness"]
