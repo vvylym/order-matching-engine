@@ -9,6 +9,7 @@ fn cargo_toml_lists_matching_and_latency_benches() {
         "latency_add",
         "itch_parse",
         "throughput_book",
+        "throughput_engine",
     ] {
         assert!(
             cargo.contains(name),

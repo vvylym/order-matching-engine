@@ -13,7 +13,7 @@
 //!
 //! 1. [`types`] — `Order`, `Price`, `Quantity`, sides, time-in-force.
 //! 2. [`engine`] — commands such as [`OrderCommand`](engine::OrderCommand) (see `engine/models.rs` in source).
-//! 3. [`engine::OrderMatchingEngine`] — wires policies, book, and store.
+//! 3. [`engine::OrderMatchingEngine`] — wires policies, book, and store; batch feeds via **[`OrderMatchingEngine::process_batch`](engine::OrderMatchingEngine::process_batch)**.
 //!
 //! # Tests and in-memory setup
 //!

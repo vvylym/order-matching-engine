@@ -25,10 +25,10 @@ Roadmap for **CPU-bound** add/cancel/match work (no sockets). **1B+ ops/s** here
 
 ### Phase 2 (week 2–3) — pooling + parallel batches
 
-- [ ] **`OrderPool`** (reuse allocations for `Order` / level nodes)  
-- [ ] **Batch** `OrderCommand` submission API on the engine  
-- [ ] **`rayon`** (optional feature) for parallel batch segments  
-- [ ] Benchmark band **~300–500M ops/sec** (document workload mix)  
+- [ ] **`OrderPool`** / arena for resting `Order` payloads (reduce `clone` pressure on book levels)  
+- [x] **Batch API:** [`OrderMatchingEngine::process_batch`](src/engine/service.rs) (`OrderCommand` iterator; commits in order, stops on first error)  
+- [ ] **`rayon`** (optional feature) for **sharded** or read-mostly paths — single-writer book stays serial  
+- [x] Engine throughput bench **[`throughput_engine`](benches/throughput_engine.rs)** — warm book + **`process_batch`** of 512 resting adds, **four** `PriceBook` backends, **`NoOpEventSink`**; local target band **~300–500M adds/sec** class on big cores (measure; not CI-gated)  
 
 ### Phase 3 (week 3–4) — order-type specialization
 
@@ -96,7 +96,7 @@ Read top-down:
 3. **[`src/types.rs`](src/types.rs)** — **`Order`**, prices, quantities, sides, TIF.
 4. **`src/book/`, `src/store/`** — traits plus concrete services.
 5. **`src/itch/`** — wire layout + streaming entry points.
-6. **`src/harness/`** (feature **`harness`**, **on by default**) — shared store, policies, and event sink; pick the book with **`engine_with_book::<PB>()`** or **`engine_with_memory()`** / **`engine_with_btree_book()`** / **`engine_with_pool_level_book()`** / **`engine_with_dash_skip_book()`** for apples-to-apples benches. To omit this module, use `omer = { version = "…", default-features = false }`.
+6. **`src/harness/`** (feature **`harness`**, **on by default**) — shared store, policies, and event sink; pick the book with **`engine_with_book`** / **`engine_with_*`**. Use **`engine_with_book_noop`** when benchmarks must not allocate on **`Event::Accepted`**. Omit harness: `omer = { version = "…", default-features = false }`.
 
 ---
 
@@ -106,6 +106,7 @@ Read top-down:
 |-------|-------------------------|
 | **`latency_add`** | Same harness, **four `PriceBook` backends** (in-memory B-tree levels, `BTreeOrderBook`, `PoolLevelOrderBook`, `DashSkipOrderBook`): one resting buy `add` per iter. Run: `cargo bench -p omer --bench latency_add`. |
 | **`throughput_book`** | **`PriceBook::push`** on **`DashSkipOrderBook`**: same-price FIFO vs distinct-price levels (50k ops/iter). Run: `cargo bench -p omer --bench throughput_book`. |
+| **`throughput_engine`** | Warmed engine + **`process_batch`** (512 resting limit buys), **four** book backends, **`NoOpEventSink`**. Run: `cargo bench -p omer --bench throughput_engine`. |
 | **`itch_parse`** | **`scan_decode_book_messages`** on a buffer of **AddOrder** packets (decode only). Run: `cargo bench -p omer --bench itch_parse`. |
 | **`micro`**, **`market_manager`**, **`matching_engine`** | **Placeholder** loops so `cargo bench --no-run` keeps targets building; see [`benches/PLAN.md`](benches/PLAN.md). |
 

@@ -56,3 +56,8 @@ required-features = ["harness"]
 [[bench]]
 name = "throughput_book"
 harness = false
+
+[[bench]]
+name = "throughput_engine"
+harness = false
+required-features = ["harness"]

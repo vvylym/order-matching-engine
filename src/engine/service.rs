@@ -190,6 +190,21 @@ where
 
         Ok(())
     }
+
+    /// Applies [`OrderCommand`]s in order via [`OrderMatchingService::process`].
+    ///
+    /// On the first error, processing stops and the error is returned; prior commands remain
+    /// committed. Intended for feed replay, gateways, and throughput experiments (see
+    /// **`throughput_engine`** bench).
+    pub fn process_batch(
+        &mut self,
+        cmds: impl IntoIterator<Item = OrderCommand>,
+    ) -> Result<()> {
+        for cmd in cmds {
+            OrderMatchingService::process(self, cmd)?;
+        }
+        Ok(())
+    }
 }
 
 impl<SG, PB, OS, MP, STP, ES> OrderMatchingService

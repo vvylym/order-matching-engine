@@ -3,7 +3,8 @@
 
 //! Shared in-memory **store**, **matching / self-trade policies**, and **event sink** for tests and benches.
 //! Swap only the **`PriceBook`** via [`engine_with_book`] or the convenience `engine_with_*` helpers
-//! so latency numbers stay comparable.
+//! so latency numbers stay comparable. For sustained throughput without event allocations, use
+//! [`engine_with_book_noop`] and [`EngineWithBookNoOp`].
 //!
 //! Enabled via the **`harness`** crate feature (on by default). Use `default-features = false` to omit.
 
@@ -26,7 +27,7 @@ use std::rc::Rc;
 use crate::book::service::{BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook};
 use crate::book::PriceBook;
 use crate::engine::OrderMatchingEngine;
-use crate::events::Event;
+use crate::events::{Event, NoOpEventSink};
 use crate::sequence::SequenceGenerator;
 use crate::types::{OrderId, Price, Quantity, Sequence, Side};
 
@@ -45,6 +46,17 @@ pub type EngineWithBook<PB> = OrderMatchingEngine<
 
 /// In-memory engine used by most **integration tests** (legacy default book).
 pub type EngineWithMemory = EngineWithBook<InMemoryPriceBook>;
+
+/// Same wiring as [`EngineWithBook`], but [`NoOpEventSink`] — use for **throughput** benches so
+/// event collection does not dominate.
+pub type EngineWithBookNoOp<PB> = OrderMatchingEngine<
+    IncrementalSequence,
+    PB,
+    InMemoryOrderStore,
+    CrossingMatchingPolicy,
+    AllowSelfTradePolicy,
+    NoOpEventSink,
+>;
 
 #[allow(dead_code)]
 pub type EngineWithSelfTradeRejection = OrderMatchingEngine<
@@ -150,6 +162,23 @@ pub fn engine_with_pool_level_book(
 pub fn engine_with_dash_skip_book(
 ) -> (EngineWithBook<DashSkipOrderBook>, CollectingEventSink) {
     engine_with_book::<DashSkipOrderBook>()
+}
+
+/// Engine with **`NoOpEventSink`** (see [`EngineWithBookNoOp`]).
+pub fn engine_with_book_noop<PB: PriceBook + Default>() -> EngineWithBookNoOp<PB> {
+    let seq = IncrementalSequence::default();
+    let book = PB::default();
+    let store = InMemoryOrderStore::default();
+    let matching = CrossingMatchingPolicy;
+    let self_trade = AllowSelfTradePolicy;
+    OrderMatchingEngine::new(
+        seq,
+        book,
+        store,
+        matching,
+        self_trade,
+        NoOpEventSink,
+    )
 }
 
 #[allow(dead_code)]

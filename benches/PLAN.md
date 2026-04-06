@@ -8,7 +8,7 @@ Design notes for **Criterion** targets under `benches/`. Sections marked with le
 
 1. **Book hot path** — [`throughput_book`](throughput_book.rs) on [`DashSkipOrderBook`](../src/book/service/dash_skip.rs); later `OrderPool`, batch APIs, `rayon`, sharded book, SIMD (README roadmap).
 2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/stream.rs).
-3. **Full engine** — `latency_*`, future `throughput_mixed` on [`OrderMatchingEngine`](../src/engine/service.rs).
+3. **Full engine** — `latency_*`, [`throughput_engine`](throughput_engine.rs), future `throughput_mixed` on [`OrderMatchingEngine`](../src/engine/service.rs).
 4. **Gateway / wire** — separate measurement when that binary exists; do not conflate with matcher-only figures.
 
 Track each layer so regressions are obvious.
