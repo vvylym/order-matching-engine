@@ -53,3 +53,36 @@ pub enum SelfTradePolicyError {
     #[error("unexpected error: {0}")]
     UnexpectedError(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{
+        Order, OrderId, OrderType, ParticipantId, Side, TimeInForce,
+    };
+
+    fn dummy_order(id: OrderId, participant_id: ParticipantId) -> Order {
+        Order {
+            symbol_id: 1,
+            id,
+            participant_id,
+            side: Side::Buy,
+            order_type: OrderType::Limit,
+            price: Some(100),
+            quantity: 1,
+            time_in_force: TimeInForce::Gtc,
+            executed_quantity: 0,
+            leaves_quantity: 1,
+            sequence: 0,
+            ..Order::default()
+        }
+    }
+
+    #[test]
+    fn allow_all_never_violates() {
+        let pol = AllowAllSelfTradePolicy;
+        let a = dummy_order(1, 99);
+        let b = dummy_order(2, 99);
+        assert!(!pol.violates(&a, &b).unwrap());
+    }
+}

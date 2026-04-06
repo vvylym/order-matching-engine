@@ -75,3 +75,81 @@ pub enum MatchingPolicyError {
     #[error("unexpected error: {0}")]
     UnexpectedError(String),
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{Order, OrderId, OrderType, Side, TimeInForce};
+
+    fn limit(side: Side, price: i64, id: OrderId) -> Order {
+        Order {
+            symbol_id: 1,
+            id,
+            participant_id: 1,
+            side,
+            order_type: OrderType::Limit,
+            price: Some(price),
+            quantity: 10,
+            time_in_force: TimeInForce::Gtc,
+            executed_quantity: 0,
+            leaves_quantity: 10,
+            sequence: 0,
+            ..Order::default()
+        }
+    }
+
+    #[test]
+    fn price_cross_same_side_is_incompatible() {
+        let p = PriceCrossMatchingPolicy;
+        let buy50 = limit(Side::Buy, 50, 1);
+        let buy51 = limit(Side::Buy, 51, 2);
+        assert!(matches!(
+            p.can_match(&buy51, &buy50),
+            Err(MatchingPolicyError::IncompatibleSides)
+        ));
+    }
+
+    #[test]
+    fn price_cross_buy_aggressor_crosses_higher_resting_sell() {
+        let p = PriceCrossMatchingPolicy;
+        let sell = limit(Side::Sell, 50, 1);
+        let buy = limit(Side::Buy, 50, 2);
+        assert!(p.can_match(&buy, &sell).unwrap());
+        let buy_below = limit(Side::Buy, 49, 3);
+        assert!(!p.can_match(&buy_below, &sell).unwrap());
+    }
+
+    #[test]
+    fn price_cross_sell_aggressor_crosses_lower_resting_buy() {
+        let p = PriceCrossMatchingPolicy;
+        let buy = limit(Side::Buy, 50, 1);
+        let sell = limit(Side::Sell, 50, 2);
+        assert!(p.can_match(&sell, &buy).unwrap());
+        let sell_above = limit(Side::Sell, 51, 3);
+        assert!(!p.can_match(&sell_above, &buy).unwrap());
+    }
+
+    #[test]
+    fn market_incoming_without_price_is_undefined() {
+        let p = PriceCrossMatchingPolicy;
+        let mut m = limit(Side::Buy, 50, 1);
+        m.price = None;
+        let sell = limit(Side::Sell, 50, 2);
+        assert!(matches!(
+            p.can_match(&m, &sell),
+            Err(MatchingPolicyError::UndefinedMarketPrice)
+        ));
+    }
+
+    #[test]
+    fn resting_market_order_price_reports_does_not_cross() {
+        let p = PriceCrossMatchingPolicy;
+        let buy = limit(Side::Buy, 50, 1);
+        let mut sell_no_px = limit(Side::Sell, 50, 2);
+        sell_no_px.price = None;
+        assert!(matches!(
+            p.can_match(&buy, &sell_no_px),
+            Err(MatchingPolicyError::PriceDoesNotCross { .. })
+        ));
+    }
+}

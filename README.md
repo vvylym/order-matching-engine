@@ -21,6 +21,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo bench   # Criterion (local); CI compiles benches with `cargo bench --no-run`
 ```
 
+Planned bench categories and implementation order: [`benches/PLAN.md`](benches/PLAN.md).
+
 Coverage (requires [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)):
 
 ```bash
@@ -33,7 +35,7 @@ CI enforces **≥ 85% line coverage** on instrumented lines for this crate (`car
 ## Tests
 
 - **`tests/`** — semantics, integrity, replay, observability, self-trade, property tests (`rstest`, `quickcheck`), ITCH fixture check.
-- **`tests/market_manager.rs`** — scenario stubs marked `ignored` track optional full scenario port from the original bench suite (run with `cargo test -- --ignored` when implemented).
+- **`tests/market_manager.rs`** — ignored stubs for future **MarketManager** / CppTrader-style scenarios; see [`benches/PLAN.md`](benches/PLAN.md) for the intended bench matrix (not run in PR CI).
 - **`tests/matching_engine.rs`** — one ignored integration benchmark-style test pending tightened stat assertions.
 
 ## Consolidation note
