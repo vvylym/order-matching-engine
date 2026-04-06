@@ -1,12 +1,14 @@
 //! Concrete price book implementations (ports).
 //!
-//! Use `omer::book::service::BTreeOrderBook` or `omer::book::service::PoolLevelOrderBook`;
-//! no need to export these from the parent module.
+//! Concrete books: [`BTreeOrderBook`], [`PoolLevelOrderBook`], and [`DashSkipOrderBook`] (Phase 1:
+//! [`dashmap`](https://docs.rs/dashmap) levels + [`crossbeam-skiplist`](https://docs.rs/crossbeam-skiplist) price index).
 
 mod btree;
+mod dash_skip;
 mod pool_level;
 
 pub use btree::BTreeOrderBook;
+pub use dash_skip::DashSkipOrderBook;
 pub use pool_level::PoolLevelOrderBook;
 
 #[cfg(test)]
@@ -74,5 +76,10 @@ mod tests {
     #[test]
     fn pool_level_order_book() {
         run_price_book_tests::<super::PoolLevelOrderBook>();
+    }
+
+    #[test]
+    fn dash_skip_order_book() {
+        run_price_book_tests::<super::DashSkipOrderBook>();
     }
 }

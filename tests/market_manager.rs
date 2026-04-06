@@ -1,5 +1,5 @@
-//! CppTrader-style **MarketManager** scenarios are not implemented in this crate yet.
-//! This module keeps **enabled** tests that only verify the written roadmap stays intact.
+//! **MarketManager** / multi-instrument scenarios are not implemented in this crate yet.
+//! This test only checks that `benches/PLAN.md` still lists the planned keywords.
 
 #[test]
 fn bench_plan_covers_latency_and_scenario_backlog() {
@@ -9,7 +9,7 @@ fn bench_plan_covers_latency_and_scenario_backlog() {
         "latency_add",
         "throughput_mixed",
         "correctness",
-        "CppTrader",
+        "multi-instrument",
         "IOC",
         "FOK",
         "AON",

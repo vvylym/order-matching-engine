@@ -1,8 +1,7 @@
-//! Market manager benchmark (target).
+//! Multi-book / “market manager” style bench (placeholder).
 //!
-//! **Target:** Run ITCH through parser + handler that only does Add/Reduce/Delete/Replace/Execute
-//! (no matching). Report: total time, ITCH msg/s, market updates/s, max symbols, max orders, max levels.
-//! CppTrader reference: ~3.2M msg/s, ~7.2M upd/s. Until manager + ITCH exist, this is a no-op stub.
+//! **Goal:** ITCH (or similar) into a handler without matching, reporting msg/s and book stats.
+//! Not wired yet: the loop only uses `black_box`.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;

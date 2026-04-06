@@ -1,7 +1,7 @@
-//! Micro-benchmarks (target).
+//! Micro-benchmarks (placeholder).
 //!
-//! **Target:** Hot-path operations: add order (limit/market), cancel, replace, single match step.
-//! Report ns per operation. Until MarketManager and book exist, these are no-op stubs.
+//! **Goal:** Nanoseconds per add, cancel, replace, and one match step. Use
+//! `latency_add` for a real add measurement today; these stubs still call `black_box` only.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;

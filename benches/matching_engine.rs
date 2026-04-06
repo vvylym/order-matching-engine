@@ -1,7 +1,7 @@
-//! Matching engine benchmark (target).
+//! ITCH + matching throughput (placeholder).
 //!
-//! **Target:** Same as market_manager but with matching enabled. Report msg/s, updates/s,
-//! and order stats. Until manager + ITCH + matching exist, this is a no-op stub.
+//! **Goal:** Feed ITCH (or fixtures) into an engine with matching on, then report rates and stats.
+//! Not wired yet: the loop only uses `black_box`.
 
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;

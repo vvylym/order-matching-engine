@@ -47,6 +47,7 @@ fn parse_error(required: usize, got: usize) -> FeedError {
 }
 
 /// Read big-endian u16 at offset.
+#[inline]
 pub fn read_u16_be(bytes: &[u8], offset: usize) -> Result<u16, FeedError> {
     let end = offset + 2;
     if bytes.len() < end {
@@ -56,6 +57,7 @@ pub fn read_u16_be(bytes: &[u8], offset: usize) -> Result<u16, FeedError> {
 }
 
 /// Read big-endian u32 at offset.
+#[inline]
 pub fn read_u32_be(bytes: &[u8], offset: usize) -> Result<u32, FeedError> {
     let end = offset + 4;
     if bytes.len() < end {
@@ -70,6 +72,7 @@ pub fn read_u32_be(bytes: &[u8], offset: usize) -> Result<u32, FeedError> {
 }
 
 /// Read big-endian u64 at offset.
+#[inline]
 pub fn read_u64_be(bytes: &[u8], offset: usize) -> Result<u64, FeedError> {
     let end = offset + 8;
     if bytes.len() < end {
@@ -88,6 +91,7 @@ pub fn read_u64_be(bytes: &[u8], offset: usize) -> Result<u64, FeedError> {
 }
 
 /// Read 6-byte big-endian timestamp at offset.
+#[inline]
 pub fn read_timestamp(
     bytes: &[u8],
     offset: usize,
@@ -107,24 +111,54 @@ pub fn read_timestamp(
 }
 
 /// Read 8-byte order id at offset.
+#[inline]
 pub fn read_oid(bytes: &[u8], offset: usize) -> Result<Oid, FeedError> {
     read_u64_be(bytes, offset).map(Oid)
 }
 
 /// Read 4-byte price at offset.
+#[inline]
 pub fn read_price(bytes: &[u8], offset: usize) -> Result<WirePrice, FeedError> {
     read_u32_be(bytes, offset).map(WirePrice)
 }
 
 /// Read 4-byte quantity at offset.
+#[inline]
 pub fn read_qty(bytes: &[u8], offset: usize) -> Result<WireQty, FeedError> {
     read_u32_be(bytes, offset).map(WireQty)
 }
 
 /// Read 2-byte stock locate at offset.
+#[inline]
 pub fn read_locate(
     bytes: &[u8],
     offset: usize,
 ) -> Result<StockLocate, FeedError> {
     read_u16_be(bytes, offset).map(StockLocate)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn read_primitives_bounds() {
+        let b = [1u8, 2, 3, 4, 5, 6, 7, 8];
+        assert_eq!(read_u16_be(&b, 0).unwrap(), 0x0102);
+        assert_eq!(read_u32_be(&b, 0).unwrap(), 0x01020304);
+        assert_eq!(read_u64_be(&b, 0).unwrap(), 0x0102030405060708);
+        assert_eq!(
+            read_timestamp(&[0, 0, 0, 0, 0, 1][..], 0).unwrap().0,
+            1
+        );
+        assert!(read_u32_be(&b, 6).is_err());
+        assert!(read_timestamp(&b, 3).is_err());
+    }
+
+    #[test]
+    fn buy_sell_bytes() {
+        assert_eq!(BuySell::try_from(b'B').unwrap() as u8, b'B');
+        assert_eq!(BuySell::try_from(b'S').unwrap() as u8, b'S');
+        assert!(BuySell::try_from(0).is_err());
+    }
 }

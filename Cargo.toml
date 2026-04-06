@@ -13,6 +13,8 @@ keywords = ["order", "matching", "engine"]
 categories = ["network", "messaging", "communication"]
 
 [dependencies]
+crossbeam-skiplist = "0.1"
+dashmap = "6"
 thiserror = "2.0"
 
 [features]
@@ -50,3 +52,7 @@ harness = false
 name = "latency_add"
 harness = false
 required-features = ["harness"]
+
+[[bench]]
+name = "throughput_book"
+harness = false

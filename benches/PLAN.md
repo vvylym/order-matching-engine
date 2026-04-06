@@ -1,12 +1,21 @@
 # Benchmark plan: per-category benches
 
-**Note:** Numbered README sections (§1–§7) cited below are **aspirational targets** from the upstream bench README this file was ported with. This repository’s [README.md](../README.md) may not duplicate every section; use this document as the **roadmap** for future Criterion targets and implementation order.
+Design notes for **Criterion** targets under `benches/`. Sections marked with legacy “§” numbers describe **goals**, not necessarily what is implemented today. For **current** bench behavior, see the [README](../README.md) “Benchmarks and performance” table.
 
-This plan maps each category to individual benchmark files under `benches/`, with targets, metrics, and implementation notes.
+### North star: 10⁹+ in-process operations per second (matcher + book)
 
-### Scenario backlog (CppTrader parity)
+**10⁹+ ops/s** is a **CPU/program target** for the **order book + matcher** when scaled with **sharding, batching, many cores, and micro-optimizations** (see README phases 1–4). It is **not** the same as a single-thread bench on a laptop; it **excludes** network I/O by definition for this number.
 
-Topics for a future **MarketManager** (or multi-book façade): **market order**, **limit** crossing, **IOC**, **FOK**, **AON**, **iceberg** / hidden quantity, **stop** and **stop-limit**, **trailing** stop, manual matching, in-flight mitigation. Implementation lives in the engine/harness first; orchestration benches come after.
+1. **Book hot path** — [`throughput_book`](throughput_book.rs) on [`DashSkipOrderBook`](../src/book/service/dash_skip.rs); later `OrderPool`, batch APIs, `rayon`, sharded book, SIMD (README roadmap).
+2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/stream.rs).
+3. **Full engine** — `latency_*`, future `throughput_mixed` on [`OrderMatchingEngine`](../src/engine/service.rs).
+4. **Gateway / wire** — separate measurement when that binary exists; do not conflate with matcher-only figures.
+
+Track each layer so regressions are obvious.
+
+### Scenario backlog (multi-instrument)
+
+Future **multi-instrument** orchestration (e.g. a **MarketManager** façade over many books) could cover: **market order**, **limit** crossing, **IOC**, **FOK**, **AON**, **iceberg** / hidden quantity, **stop** and **stop-limit**, **trailing** stop, manual matching, in-flight mitigation. The single-symbol engine and **`harness`** come first; orchestration benches later.
 
 ---
 

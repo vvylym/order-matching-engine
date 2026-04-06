@@ -64,6 +64,7 @@ impl TryFrom<u8> for ItchMsgType {
     }
 }
 
+#[inline]
 pub fn message_len(t: ItchMsgType) -> u8 {
     use ItchMsgType::*;
     match t {
@@ -130,6 +131,13 @@ pub struct AddOrderMpid {
 
 impl AddOrderMpid {
     pub fn parse(bytes: &[u8]) -> Result<Self, FeedError> {
+        const LEN: usize = 40;
+        if bytes.len() < LEN {
+            return Err(FeedError::Parse {
+                required: LEN,
+                got: bytes.len(),
+            });
+        }
         Ok(AddOrderMpid {
             add_msg: AddOrder::parse(bytes)?,
         })
@@ -171,6 +179,13 @@ pub struct ExecuteOrderWithPrice {
 
 impl ExecuteOrderWithPrice {
     pub fn parse(bytes: &[u8]) -> Result<Self, FeedError> {
+        const LEN: usize = 36;
+        if bytes.len() < LEN {
+            return Err(FeedError::Parse {
+                required: LEN,
+                got: bytes.len(),
+            });
+        }
         Ok(ExecuteOrderWithPrice {
             exec: ExecuteOrder::parse(bytes)?,
         })
@@ -248,5 +263,123 @@ impl ReplaceOrder {
             new_qty: read_qty(bytes, 27)?,
             new_price: read_price(bytes, 31)?,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::itch::wire::BuySell;
+
+    #[test]
+    fn itch_msg_type_try_from_matches_message_len_table() {
+        let all = [
+            ItchMsgType::Sysevent,
+            ItchMsgType::StockDirectory,
+            ItchMsgType::TradingAction,
+            ItchMsgType::RegShoRestrict,
+            ItchMsgType::MpidPosition,
+            ItchMsgType::MwcbDecline,
+            ItchMsgType::MwcbStatus,
+            ItchMsgType::IpoQuoteUpdate,
+            ItchMsgType::AddOrder,
+            ItchMsgType::AddOrderMpid,
+            ItchMsgType::ExecuteOrder,
+            ItchMsgType::ExecuteOrderWithPrice,
+            ItchMsgType::ReduceOrder,
+            ItchMsgType::DeleteOrder,
+            ItchMsgType::ReplaceOrder,
+            ItchMsgType::Trade,
+            ItchMsgType::CrossTrade,
+            ItchMsgType::BrokenTrade,
+            ItchMsgType::NetOrderImbalance,
+            ItchMsgType::RetailPriceImprovement,
+            ItchMsgType::ProcessLuldAuctionCollarMessage,
+        ];
+        for t in all {
+            let b = t as u8;
+            assert_eq!(ItchMsgType::try_from(b).unwrap() as u8, b);
+            assert!(message_len(t) > 0);
+        }
+    }
+
+    #[test]
+    fn unknown_message_type_rejected() {
+        assert!(matches!(
+            ItchMsgType::try_from(0x7f),
+            Err(FeedError::InvalidMessageType(0x7f))
+        ));
+    }
+
+    #[test]
+    fn add_order_roundtrip_and_invalid_buy_sell() {
+        let mut p = vec![0u8; 36];
+        p[1..3].copy_from_slice(&7u16.to_be_bytes());
+        p[11..19].copy_from_slice(&42u64.to_be_bytes());
+        p[19] = b'B';
+        p[20..24].copy_from_slice(&100u32.to_be_bytes());
+        p[32..36].copy_from_slice(&50_000u32.to_be_bytes());
+        let m = AddOrder::parse(&p).unwrap();
+        assert_eq!(m.stock_locate.0, 7);
+        assert_eq!(m.oid.0, 42);
+        assert_eq!(m.qty.0, 100);
+        assert_eq!(m.price.0, 50_000);
+        assert!(matches!(m.buy, BuySell::Buy));
+
+        p[19] = b'X';
+        assert!(matches!(
+            AddOrder::parse(&p),
+            Err(FeedError::InvalidBuySell(b'X'))
+        ));
+
+        assert!(matches!(
+            AddOrder::parse(&p[..10]),
+            Err(FeedError::Parse { .. })
+        ));
+    }
+
+    #[test]
+    fn add_order_mpid_requires_40_bytes() {
+        let mut p = vec![0u8; 40];
+        p[1..3].copy_from_slice(&1u16.to_be_bytes());
+        p[11..19].copy_from_slice(&9u64.to_be_bytes());
+        p[19] = b'S';
+        p[20..24].copy_from_slice(&1u32.to_be_bytes());
+        p[32..36].copy_from_slice(&123u32.to_be_bytes());
+        assert!(AddOrderMpid::parse(&p[..39]).is_err());
+        let _ = AddOrderMpid::parse(&p).unwrap();
+    }
+
+    #[test]
+    fn delete_reduce_execute_replace_short_buffer() {
+        assert!(DeleteOrder::parse(&[0u8; 10]).is_err());
+        assert!(ReduceOrder::parse(&[0u8; 10]).is_err());
+        assert!(ExecuteOrder::parse(&[0u8; 10]).is_err());
+        assert!(ExecuteOrderWithPrice::parse(&[0u8; 35]).is_err());
+        assert!(ReplaceOrder::parse(&[0u8; 10]).is_err());
+    }
+
+    #[test]
+    fn execute_with_price_accepts_36_bytes() {
+        let mut p = vec![0u8; 36];
+        p[11..19].copy_from_slice(&99u64.to_be_bytes());
+        p[19..23].copy_from_slice(&5u32.to_be_bytes());
+        let m = ExecuteOrderWithPrice::parse(&p).unwrap();
+        assert_eq!(m.exec.oid.0, 99);
+        assert_eq!(m.exec.qty.0, 5);
+    }
+
+    #[test]
+    fn replace_order_fields() {
+        let mut p = vec![0u8; 35];
+        p[11..19].copy_from_slice(&1u64.to_be_bytes());
+        p[19..27].copy_from_slice(&2u64.to_be_bytes());
+        p[27..31].copy_from_slice(&30u32.to_be_bytes());
+        p[31..35].copy_from_slice(&40_000u32.to_be_bytes());
+        let m = ReplaceOrder::parse(&p).unwrap();
+        assert_eq!(m.oid.0, 1);
+        assert_eq!(m.new_order_id.0, 2);
+        assert_eq!(m.new_qty.0, 30);
+        assert_eq!(m.new_price.0, 40_000);
     }
 }

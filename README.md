@@ -1,62 +1,128 @@
-# order-matching-engine (`omer`)
+# omer — order matching engine
 
-Single-crate **order matching engine** in Rust: a concrete `OrderMatchingEngine` generic over book, store, sequence, policies, and event sink; **ITCH** ingest helpers; **Criterion** benches; and a broad **integration test matrix** (limits, markets, cancel/replace, determinism, stress).
+[![CI](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml)
 
-Public surface follows the **`OrderMatchingService`** port: `add`, `cancel`, `replace`, **`cancel_by_order_id`**, **`reduce`**, **`execute`**, **`replace_by_new_id`**, and `process` over `OrderCommand` (see [`engine/models.rs`](src/engine/models.rs)).
+Rust library that matches **limit and market orders** against a **price–time** book: add, cancel, replace, and related commands go through one **`OrderMatchingEngine`** type. Numbers are integers (ticks / lots); there is no `f64` on the hot path.
 
-## Layout (single crate)
+**Repository:** [github.com/vvylym/order-matching-engine](https://github.com/vvylym/order-matching-engine)  
+**Crate name on crates.io:** `omer` (same as the package in `Cargo.toml`).
 
-| Module | Role |
-|--------|------|
-| `engine` | Commands, `OrderMatchingService` trait, `OrderMatchingEngine` implementation |
-| `book` / `store` | `PriceBook` / `OrderStore` traits + in-crate `btree`, `pool_level`, `dense`, `hash_map` services |
-| `matching` / `self_trade` / `sequence` / `events` | Policies and event sink trait |
-| `itch` | Buffered NASDAQ ITCH-style feed parsing wired into `OrderMatchingEngine` |
-| `harness` | In-memory book/store/sink/policies + `engine_with_memory()` for tests and benches (**`harness` feature**, on by default; use `default-features = false` to omit) |
+If **GitHub’s README looks stale**, compare the **commit on `main`** to your local tree — the default branch only changes after a **push** (or merged PR).
+
+---
+
+## Performance roadmap (matching hot path → 1B+ ops/s in-process)
+
+Roadmap for **CPU-bound** add/cancel/match work (no sockets). **1B+ ops/s** here means the **matcher + book** sustaining that aggregate rate on suitable hardware (many cores, batching, sharding — see Phase 4), not a single `localhost` TCP loop.
+
+### Phase 1 (week 1–2) — book structure + first throughput band
+
+- [x] Add **`dashmap`** dependency  
+- [x] Per-side book: **`DashMap<Price, Vec<Order>>`** for level queues + **`SkipMap<Price, ()>`** for best bid / best ask  
+- [x] **`DashSkipOrderBook`** in [`src/book/service/dash_skip.rs`](src/book/service/dash_skip.rs) (implements [`PriceBook`](src/book/mod.rs))  
+- [x] Benchmark **`throughput_book`** — target **~200–300M pushes/sec** on strong CPUs (run locally; record CPU + `rustc -V`)  
+- [ ] Extend **`latency_*`** benches to compare **BTree vs DashSkip** behind the same harness  
+
+### Phase 2 (week 2–3) — pooling + parallel batches
+
+- [ ] **`OrderPool`** (reuse allocations for `Order` / level nodes)  
+- [ ] **Batch** `OrderCommand` submission API on the engine  
+- [ ] **`rayon`** (optional feature) for parallel batch segments  
+- [ ] Benchmark band **~300–500M ops/sec** (document workload mix)  
+
+### Phase 3 (week 3–4) — order-type specialization
+
+- [x] Rich **`Order`** / TIF types (already in crate)  
+- [ ] **`OrderBehavior`**, trait-based or enum-dispatched fast paths per order type  
+- [ ] Benches **per order type**; **no regression** vs baseline commits  
+
+### Phase 4 (week 4–5) — sharding + micro-architecture
+
+- [ ] **`ShardedOrderBook`** (partition by price / symbol)  
+- [ ] **SIMD** helpers where profiling proves they win  
+- [ ] **CPU affinity** / pinning notes or cfg for deployment  
+- [ ] Benchmark band **~500M–1B+ ops/sec** aggregate in-process; **perf / flamegraph** in [`benches/PLAN.md`](benches/PLAN.md)  
+
+---
+
+## What you get today
+
+| Area | Status |
+|------|--------|
+| **Matching** | Single-symbol engine: limit/market, partial fills, IOC/GTC and related TIF, replace, cancel-by-id, reduce, execute (see `OrderCommand` in [`src/engine/models.rs`](src/engine/models.rs)). |
+| **Storage / book** | **`PriceBook`** + **`OrderStore`**: `BTreeOrderBook`, **`DashSkipOrderBook`** (DashMap + SkipMap, Phase 1), `PoolLevelOrderBook`, `dense` / `hash_map` stores. |
+| **ITCH** | NASDAQ ITCH-style **binary messages** can be read from a stream and turned into engine commands (`src/itch/`). |
+| **Tests** | Integration tests under [`tests/`](tests/) (semantics, replay, self-trade, stress/property checks). CI runs them on every push/PR. |
+| **Coverage** | CI fails if **line** coverage (llvm-cov) falls **below 85%** — see [`scripts/coverage.sh`](scripts/coverage.sh). |
+
+---
+
+## Requirements
+
+- **Rust:** stable toolchain (same as CI; edition 2024 in `Cargo.toml`).
+- **Optional:** [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov) locally to match the coverage job.
+
+---
 
 ## Quick start
 
+Clone the repo, then from the crate root:
+
 ```bash
 cargo test --all-features --all-targets
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo bench   # Criterion (local); CI compiles benches with `cargo bench --no-run`
 ```
 
-Planned bench categories and implementation order: [`benches/PLAN.md`](benches/PLAN.md). First **real** hot-path bench: **`latency_add`** (`cargo bench -p omer --bench latency_add`, requires default `harness` feature).
-
-Coverage (requires [cargo-llvm-cov](https://github.com/taiki-e/cargo-llvm-cov)):
+Run the linter the same way CI does:
 
 ```bash
-chmod +x scripts/coverage.sh   # once
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+```
+
+Line coverage (after installing `cargo-llvm-cov`):
+
+```bash
+chmod +x scripts/coverage.sh
 ./scripts/coverage.sh
 ```
 
-CI enforces **≥ 85% line coverage** on instrumented lines for this crate (`cargo llvm-cov` summary).
+---
 
-## Tests
+## How the crate is organized
 
-- **`tests/`** — semantics, integrity, replay, observability, self-trade, property tests (`rstest`, `quickcheck`), ITCH fixture check.
-- **`tests/market_manager.rs`** — asserts **CppTrader / MarketManager** scenario keywords stay documented in [`benches/PLAN.md`](benches/PLAN.md) (no `#[ignore]` placeholders).
-- **`tests/matching_engine.rs`** — guards that ITCH/matching **bench entries** and README ITCH mention remain present.
+Read top-down:
 
-## Consolidation note
+1. **[`src/lib.rs`](src/lib.rs)** — short overview of modules (crate docs).
+2. **[`src/engine/`](src/engine/)** — **`OrderMatchingService`** trait and **`OrderMatchingEngine`** implementation.
+3. **[`src/types.rs`](src/types.rs)** — **`Order`**, prices, quantities, sides, TIF.
+4. **`src/book/`, `src/store/`** — traits plus concrete services.
+5. **`src/itch/`** — wire layout + streaming entry points.
+6. **`src/harness/`** (feature **`harness`**, **on by default**) — in-memory book/store/sink and **`engine_with_memory()`** for tests and benchmarks. To depend on this library without that code path, use `omer = { version = "…", default-features = false }` in your own crate (you lose bench helpers that expect this module).
 
-Implementation and ITCH stack derive from the local **`Work/omer`** tree; integration tests from **`Work/order-matching-engine`**, rebased on the extended command API (`symbol_id` and optional fields on `AddOrderCommand`, etc.). A future **workspace split** (lib + thin gateway binaries) is described in the repo planning doc but is **not** required for this single-crate snapshot.
+---
 
-## Performance and safety policy
+## Benchmarks and performance (today)
 
-- **`unsafe`:** The crate keeps **`unsafe_code = forbid`** unless a change introduces a **minimal** `unsafe` scope with **`// SAFETY:`** comments and review—never by default for speed.
-- **CI vs load tests:** Default **PR CI** runs correctness gates (fmt, clippy, tests, coverage, audit, `cargo bench --no-run`). It does **not** run gateway daemons, long soak tests, or full benchmark **executions**. When gateway tests, load tests, or full benches are run elsewhere, **document results** (command, hardware, git SHA, numbers) in the PR or a perf log before merging changes that claim throughput milestones.
-- **Throughput metric:** Any **>1B orders/sec** headline means **end-to-end** throughput—orders that complete the full **client → gateway → matcher** path (validated, routed, and applied by the matcher under an explicit counting rule)—**not** gateway ingress or accept-only counts.
+| Bench | What it does right now |
+|-------|-------------------------|
+| **`latency_add`** | Time for one **`engine.add(...)`** on a resting buy limit (in-memory harness). Run: `cargo bench -p omer --bench latency_add`. |
+| **`throughput_book`** | **`PriceBook::push`** on **`DashSkipOrderBook`**: same-price FIFO vs distinct-price levels (50k ops/iter). Run: `cargo bench -p omer --bench throughput_book`. |
+| **`itch_parse`** | **`scan_decode_book_messages`** on a buffer of **AddOrder** packets (decode only). Run: `cargo bench -p omer --bench itch_parse`. |
+| **`micro`**, **`market_manager`**, **`matching_engine`** | **Placeholder** loops so `cargo bench --no-run` keeps targets building; see [`benches/PLAN.md`](benches/PLAN.md). |
 
-## Performance roadmap
+**North star:** **10⁹+ in-process operations per second** on the **matcher + book** path is a **program target** (sharding, batching, SIMD, cores — Phase 4), not something a single-threaded integration test proves. Network I/O is out of scope for that number: measure **decode**, **book/engine**, and (later) **gateway** separately. Always record hardware and `rustc` with published figures.
 
-Correctness and coverage first; distributed **gateway + TCP** and **>1B orders/sec (E2E)** remain future Phase 5 work; see project planning docs for scope.
+**Pull request CI** compiles all benches but **does not** run long or distributed load tests (keeps feedback fast). If you run heavy benchmarks locally, record machine, git revision, and command in the PR text when you report numbers.
 
-## Crates.io name
+**Safety:** `unsafe` is **forbidden** at crate level unless a future change adds a **small**, reviewed block with an explicit `// SAFETY:` note.
 
-The package name is **`omer`** (Rust crate name).
+---
+
+## Contributing
+
+Issues and PRs are welcome. Match **existing style** (formatting, `clippy -D warnings`, tests). Use **conventional commits** if you can (`feat:`, `fix:`, `docs:`, …). For larger changes, open an issue first so direction matches maintainers’ expectations.
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE).
