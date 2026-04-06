@@ -15,6 +15,10 @@ categories = ["network", "messaging", "communication"]
 [dependencies]
 thiserror = "2.0"
 
+[features]
+default = ["harness"]
+harness = []
+
 [lints.rust]
 unsafe_code = "forbid"
 missing_docs = "deny"
@@ -41,3 +45,8 @@ harness = false
 [[bench]]
 name = "micro"
 harness = false
+
+[[bench]]
+name = "latency_add"
+harness = false
+required-features = ["harness"]

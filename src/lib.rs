@@ -11,5 +11,8 @@ pub mod sequence;
 pub mod store;
 pub mod types;
 
+#[cfg(feature = "harness")]
+pub mod harness;
+
 #[cfg(test)]
 mod tests;
