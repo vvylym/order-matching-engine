@@ -5,6 +5,31 @@ use mockall::automock;
 
 use crate::types::Sequence;
 
+/// Simple sequence generator that increments from 0.
+/// Use for tests and integration (e.g. ITCH ingestion).
+#[derive(Debug, Default)]
+pub struct CounterSequenceGenerator {
+    next: Sequence,
+}
+
+impl CounterSequenceGenerator {
+    /// Creates a new counter starting at 0.
+    pub fn new() -> Self {
+        Self { next: 0 }
+    }
+}
+
+impl SequenceGenerator for CounterSequenceGenerator {
+    fn next(&mut self) -> Result<Sequence, SequenceGeneratorError> {
+        let v = self.next;
+        self.next = self
+            .next
+            .checked_add(1)
+            .ok_or(SequenceGeneratorError::Overflow)?;
+        Ok(v)
+    }
+}
+
 /// Sequence generator trait
 #[cfg_attr(test, automock)]
 pub trait SequenceGenerator {

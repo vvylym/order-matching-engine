@@ -3,15 +3,66 @@
 
 use crate::types::*;
 
-/// Order matching commands
+/// Order matching commands (engine port).
+/// Protocols (e.g. ITCH) decode wire messages into these variants; the engine is the single consumer.
 #[derive(Debug, Clone)]
 pub enum OrderCommand {
     /// Add an order
     Add(AddOrderCommand),
-    /// Cancel an order
+    /// Cancel an order (requires participant and sequence for ownership).
     Cancel(CancelOrderCommand),
-    /// Replace an order
+    /// Replace an order in place (same id, new price/quantity).
     Replace(ReplaceOrderCommand),
+    /// Cancel by order id only (e.g. protocol feed delete; no participant/sequence check).
+    CancelByOrderId(CancelByOrderIdCommand),
+    /// Reduce (partial cancel) an order by quantity.
+    Reduce(ReduceOrderCommand),
+    /// Execute (fill) a quantity of an order.
+    Execute(ExecuteOrderCommand),
+    /// Replace an order with a new id (e.g. ITCH replace: old_id → new_id, new price/quantity).
+    ReplaceByNewId(ReplaceOrderByNewIdCommand),
+}
+
+/// Cancel by order id only (for protocol feeds that do not send participant/sequence).
+#[derive(Debug, Clone)]
+pub struct CancelByOrderIdCommand {
+    /// Order id to cancel.
+    pub order_id: OrderId,
+}
+
+/// Reduce (partial cancel) by quantity.
+#[derive(Debug, Clone)]
+pub struct ReduceOrderCommand {
+    /// Order id to reduce.
+    pub order_id: OrderId,
+    /// Quantity to cancel.
+    pub quantity: Quantity,
+}
+
+/// Execute (fill) a quantity of an order.
+#[derive(Debug, Clone)]
+pub struct ExecuteOrderCommand {
+    /// Order id executed.
+    pub order_id: OrderId,
+    /// Executed quantity.
+    pub quantity: Quantity,
+}
+
+/// Replace order with a new id (protocol semantics: old order removed, new order added).
+#[derive(Debug, Clone)]
+pub struct ReplaceOrderByNewIdCommand {
+    /// Existing order id to replace.
+    pub old_order_id: OrderId,
+    /// New order id.
+    pub new_order_id: OrderId,
+    /// New limit price.
+    pub new_price: Price,
+    /// New quantity.
+    pub new_quantity: Quantity,
+    /// Symbol (from original order when `None`, e.g. ITCH replace).
+    pub symbol_id: Option<SymbolId>,
+    /// Side (from original order when `None`, e.g. ITCH replace).
+    pub side: Option<Side>,
 }
 
 /// Add order command

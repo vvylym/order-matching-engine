@@ -8,6 +8,16 @@ use crate::{
     types::{OrderId, Trade},
 };
 
+/// Event sink that discards all events (e.g. for ingestion tests).
+#[derive(Debug, Clone, Default)]
+pub struct NoOpEventSink;
+
+impl EventSink for NoOpEventSink {
+    fn emit(&self, _event: Event) -> Result<(), EventSinkError> {
+        Ok(())
+    }
+}
+
 /// Event sink trait
 #[cfg_attr(test, automock)]
 pub trait EventSink {

@@ -29,18 +29,20 @@ pub struct Symbol {
 }
 
 /// Side of an order
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Side {
     /// Buy side
+    #[default]
     Buy,
     /// Sell side
     Sell,
 }
 
 /// Type of an order
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OrderType {
     /// Limit order
+    #[default]
     Limit,
     /// Market order
     Market,
@@ -55,9 +57,10 @@ pub enum OrderType {
 }
 
 /// Time-in-Force of an order
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TimeInForce {
     /// Good Till Cancel (GTC)
+    #[default]
     Gtc,
     /// Immediate Or Cancel (IOC)
     Ioc,
@@ -68,7 +71,7 @@ pub enum TimeInForce {
 }
 
 /// An order
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Order {
     /// Symbol identifier
     pub symbol_id: SymbolId,
