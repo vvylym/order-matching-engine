@@ -52,13 +52,16 @@ impl PriceBook for BTreeOrderBook {
         level.push(order.clone());
     }
 
-    fn pop_best(&mut self, side: Side) -> Option<Order> {
-        let (_best_price, level_key) = match side {
-            Side::Buy => self.bids.keys().next_back().copied(),
-            Side::Sell => self.asks.keys().next().copied(),
+    fn pop_best(&mut self, aggressor_side: Side) -> Option<Order> {
+        let (_best_price, level_key) = match aggressor_side {
+            Side::Buy => self.asks.keys().next().copied(),
+            Side::Sell => self.bids.keys().next_back().copied(),
         }
         .map(|p| (p, p))?;
-        let map = self.side_map_mut(side);
+        let map = match aggressor_side {
+            Side::Buy => &mut self.asks,
+            Side::Sell => &mut self.bids,
+        };
         let level = map.get_mut(&level_key)?;
         let order = level.remove(0);
         if level.is_empty() {

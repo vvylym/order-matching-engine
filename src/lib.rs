@@ -18,7 +18,8 @@
 //! # Tests and in-memory setup
 //!
 //! Integration tests build a real engine with in-memory structures. Those live under the
-//! **`harness`** feature (enabled by default): see **[`harness`]** and re-exports from `tests/common`.
+//! **`harness`** feature (enabled by default): **[`harness`]**, including [`harness::engine_with_book`]
+//! to swap [`book::PriceBook`] implementations for comparable benches.
 //!
 //! # Unsafe
 //!

@@ -53,16 +53,17 @@ mod tests {
         book.push(&200, &order(3, Side::Sell, 200, 1));
         assert_eq!(book.best_ask(), Some(200));
 
+        // Aggressor buy pops resting sells (FIFO at best ask).
         let mut book = B::default();
-        book.push(&100, &order(1, Side::Buy, 100, 10));
-        book.push(&100, &order(2, Side::Buy, 100, 5));
+        book.push(&100, &order(1, Side::Sell, 100, 10));
+        book.push(&100, &order(2, Side::Sell, 100, 5));
         assert_eq!(book.pop_best(Side::Buy).unwrap().id, 1);
         assert_eq!(book.pop_best(Side::Buy).unwrap().id, 2);
         assert!(book.pop_best(Side::Buy).is_none());
 
         let mut book = B::default();
-        book.push(&100, &order(1, Side::Buy, 100, 10));
-        book.push(&100, &order(2, Side::Buy, 100, 5));
+        book.push(&100, &order(1, Side::Sell, 100, 10));
+        book.push(&100, &order(2, Side::Sell, 100, 5));
         let r = book.remove(&1).unwrap();
         assert_eq!(r.id, 1);
         assert_eq!(book.pop_best(Side::Buy).unwrap().id, 2);

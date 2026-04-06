@@ -1,10 +1,11 @@
 #![allow(missing_docs)]
 #![allow(clippy::type_complexity)]
 
-//! Shared in-memory engine wiring for **integration tests** and **Criterion benches**.
+//! Shared in-memory **store**, **matching / self-trade policies**, and **event sink** for tests and benches.
+//! Swap only the **`PriceBook`** via [`engine_with_book`] or the convenience `engine_with_*` helpers
+//! so latency numbers stay comparable.
 //!
-//! Enabled via the **`harness`** crate feature (on by default). Dependents may use
-//! `default-features = false` to omit this module from documentation surface if desired.
+//! Enabled via the **`harness`** crate feature (on by default). Use `default-features = false` to omit.
 
 mod memory;
 mod policy;
@@ -22,20 +23,28 @@ pub use sink::CollectingEventSink;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::book::service::{BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook};
+use crate::book::PriceBook;
 use crate::engine::OrderMatchingEngine;
 use crate::events::Event;
 use crate::sequence::SequenceGenerator;
 use crate::types::{OrderId, Price, Quantity, Sequence, Side};
 
-/// In-memory engine used by most integration tests and latency benches.
-pub type EngineWithMemory = OrderMatchingEngine<
+/// Engine wired with book type **`PB`**, in-memory store, harness policies, and event collector.
+///
+/// Use [`engine_with_book`], [`engine_with_memory`], [`engine_with_btree_book`], etc., to compare
+/// book implementations under the same harness in benchmarks.
+pub type EngineWithBook<PB> = OrderMatchingEngine<
     IncrementalSequence,
-    InMemoryPriceBook,
+    PB,
     InMemoryOrderStore,
     CrossingMatchingPolicy,
     AllowSelfTradePolicy,
     CollectingEventSink,
 >;
+
+/// In-memory engine used by most **integration tests** (legacy default book).
+pub type EngineWithMemory = EngineWithBook<InMemoryPriceBook>;
 
 #[allow(dead_code)]
 pub type EngineWithSelfTradeRejection = OrderMatchingEngine<
@@ -107,9 +116,11 @@ pub fn engine_with_self_trade_rejection()
     (engine, sink_clone)
 }
 
-pub fn engine_with_memory() -> (EngineWithMemory, CollectingEventSink) {
+/// Build an engine with the given **`PriceBook`** implementation (same store, policies, sink).
+pub fn engine_with_book<PB: PriceBook + Default>(
+) -> (EngineWithBook<PB>, CollectingEventSink) {
     let seq = IncrementalSequence::default();
-    let book = InMemoryPriceBook::default();
+    let book = PB::default();
     let store = InMemoryOrderStore::default();
     let matching = CrossingMatchingPolicy;
     let self_trade = AllowSelfTradePolicy;
@@ -118,6 +129,27 @@ pub fn engine_with_memory() -> (EngineWithMemory, CollectingEventSink) {
     let engine =
         OrderMatchingEngine::new(seq, book, store, matching, self_trade, sink);
     (engine, sink_clone)
+}
+
+pub fn engine_with_memory() -> (EngineWithMemory, CollectingEventSink) {
+    engine_with_book::<InMemoryPriceBook>()
+}
+
+/// [`BTreeOrderBook`]: B-tree levels + order-index removes.
+pub fn engine_with_btree_book() -> (EngineWithBook<BTreeOrderBook>, CollectingEventSink) {
+    engine_with_book::<BTreeOrderBook>()
+}
+
+/// [`PoolLevelOrderBook`]: signed-price level pool.
+pub fn engine_with_pool_level_book(
+) -> (EngineWithBook<PoolLevelOrderBook>, CollectingEventSink) {
+    engine_with_book::<PoolLevelOrderBook>()
+}
+
+/// [`DashSkipOrderBook`]: DashMap levels + SkipMap best price (Phase 1 path).
+pub fn engine_with_dash_skip_book(
+) -> (EngineWithBook<DashSkipOrderBook>, CollectingEventSink) {
+    engine_with_book::<DashSkipOrderBook>()
 }
 
 #[allow(dead_code)]

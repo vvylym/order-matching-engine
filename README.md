@@ -21,7 +21,7 @@ Roadmap for **CPU-bound** add/cancel/match work (no sockets). **1B+ ops/s** here
 - [x] Per-side book: **`DashMap<Price, Vec<Order>>`** for level queues + **`SkipMap<Price, ()>`** for best bid / best ask  
 - [x] **`DashSkipOrderBook`** in [`src/book/service/dash_skip.rs`](src/book/service/dash_skip.rs) (implements [`PriceBook`](src/book/mod.rs))  
 - [x] Benchmark **`throughput_book`** — target **~200–300M pushes/sec** on strong CPUs (run locally; record CPU + `rustc -V`)  
-- [ ] Extend **`latency_*`** benches to compare **BTree vs DashSkip** behind the same harness  
+- [x] **`latency_add`** compares **InMemory**, **BTree**, **PoolLevel**, **DashSkip** behind the same harness ([`benches/latency_add.rs`](benches/latency_add.rs))  
 
 ### Phase 2 (week 2–3) — pooling + parallel batches
 
@@ -96,7 +96,7 @@ Read top-down:
 3. **[`src/types.rs`](src/types.rs)** — **`Order`**, prices, quantities, sides, TIF.
 4. **`src/book/`, `src/store/`** — traits plus concrete services.
 5. **`src/itch/`** — wire layout + streaming entry points.
-6. **`src/harness/`** (feature **`harness`**, **on by default**) — in-memory book/store/sink and **`engine_with_memory()`** for tests and benchmarks. To depend on this library without that code path, use `omer = { version = "…", default-features = false }` in your own crate (you lose bench helpers that expect this module).
+6. **`src/harness/`** (feature **`harness`**, **on by default**) — shared store, policies, and event sink; pick the book with **`engine_with_book::<PB>()`** or **`engine_with_memory()`** / **`engine_with_btree_book()`** / **`engine_with_pool_level_book()`** / **`engine_with_dash_skip_book()`** for apples-to-apples benches. To omit this module, use `omer = { version = "…", default-features = false }`.
 
 ---
 
@@ -104,7 +104,7 @@ Read top-down:
 
 | Bench | What it does right now |
 |-------|-------------------------|
-| **`latency_add`** | Time for one **`engine.add(...)`** on a resting buy limit (in-memory harness). Run: `cargo bench -p omer --bench latency_add`. |
+| **`latency_add`** | Same harness, **four `PriceBook` backends** (in-memory B-tree levels, `BTreeOrderBook`, `PoolLevelOrderBook`, `DashSkipOrderBook`): one resting buy `add` per iter. Run: `cargo bench -p omer --bench latency_add`. |
 | **`throughput_book`** | **`PriceBook::push`** on **`DashSkipOrderBook`**: same-price FIFO vs distinct-price levels (50k ops/iter). Run: `cargo bench -p omer --bench throughput_book`. |
 | **`itch_parse`** | **`scan_decode_book_messages`** on a buffer of **AddOrder** packets (decode only). Run: `cargo bench -p omer --bench itch_parse`. |
 | **`micro`**, **`market_manager`**, **`matching_engine`** | **Placeholder** loops so `cargo bench --no-run` keeps targets building; see [`benches/PLAN.md`](benches/PLAN.md). |

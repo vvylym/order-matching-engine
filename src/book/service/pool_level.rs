@@ -114,10 +114,10 @@ impl PriceBook for PoolLevelOrderBook {
         self.index.insert(order.id, (sp, idx));
     }
 
-    fn pop_best(&mut self, side: Side) -> Option<Order> {
-        let (best_key, level_idx) = match side {
-            Side::Buy => self.levels.range(0..).next_back(),
-            Side::Sell => self.levels.range(..0).next_back(),
+    fn pop_best(&mut self, aggressor_side: Side) -> Option<Order> {
+        let (best_key, level_idx) = match aggressor_side {
+            Side::Buy => self.levels.range(..0).next_back(),
+            Side::Sell => self.levels.range(0..).next_back(),
         }
         .map(|(k, &v)| (*k, v))?;
         let level = self.pool.get_mut(level_idx)?;

@@ -134,10 +134,10 @@ impl PriceBook for DashSkipOrderBook {
         }
     }
 
-    fn pop_best(&mut self, side: Side) -> Option<Order> {
-        let order = match side {
-            Side::Buy => self.bids.pop_best_buy(),
-            Side::Sell => self.asks.pop_best_sell(),
+    fn pop_best(&mut self, aggressor_side: Side) -> Option<Order> {
+        let order = match aggressor_side {
+            Side::Buy => self.asks.pop_best_sell(),
+            Side::Sell => self.bids.pop_best_buy(),
         }?;
         self.index.remove(&order.id);
         Some(order)

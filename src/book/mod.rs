@@ -17,7 +17,9 @@ pub trait PriceBook {
     fn best_ask(&self) -> Option<Price>;
     /// Push an order to the price book
     fn push(&mut self, price: &Price, order: &Order);
-    /// Pop the best order from the price book
+    /// Pop the best resting order **on the opposite side** to `side` (the **aggressor** side):
+    /// incoming **buy** consumes **asks** (lowest ask first, FIFO at level); incoming **sell**
+    /// consumes **bids** (highest bid first, FIFO at level).
     fn pop_best(&mut self, side: Side) -> Option<Order>;
     /// Remove an order from the price book
     fn remove(&mut self, order_id: &OrderId) -> Option<Order>;
