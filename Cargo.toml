@@ -21,20 +21,3 @@ missing_docs = "deny"
 
 [dev-dependencies]
 mockall = "0.14"
-criterion = "0.8"
-
-[[bench]]
-name = "itch_parse"
-harness = false
-
-[[bench]]
-name = "market_manager"
-harness = false
-
-[[bench]]
-name = "matching_engine"
-harness = false
-
-[[bench]]
-name = "micro"
-harness = false
