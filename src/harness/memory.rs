@@ -6,10 +6,63 @@ use crate::book::PriceBook;
 use crate::store::{OrderStore, OrderStoreError};
 use crate::types::{Order, OrderId, Price, Quantity, Sequence, Side};
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::rc::Rc;
 
-type PriceLevel = BTreeMap<Price, VecDeque<(OrderId, Sequence)>>;
+type PriceLevel = BTreeMap<Price, LevelQueue>;
+
+#[derive(Default)]
+struct LevelQueue {
+    entries: Vec<(OrderId, Sequence)>,
+    positions: HashMap<OrderId, usize>,
+}
+
+impl LevelQueue {
+    fn push(&mut self, order_id: OrderId, time_priority: Sequence) {
+        let idx = self.entries.len();
+        self.entries.push((order_id, time_priority));
+        self.positions.insert(order_id, idx);
+    }
+
+    fn pop_min_sequence(&mut self) -> Option<OrderId> {
+        let idx = self
+            .entries
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (_, seq))| *seq)
+            .map(|(i, _)| i)?;
+        self.remove_at(idx).map(|(order_id, _)| order_id)
+    }
+
+    fn remove_by_id(
+        &mut self,
+        order_id: &OrderId,
+    ) -> Option<(OrderId, Sequence)> {
+        let idx = *self.positions.get(order_id)?;
+        self.remove_at(idx)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &(OrderId, Sequence)> {
+        self.entries.iter()
+    }
+
+    fn remove_at(&mut self, idx: usize) -> Option<(OrderId, Sequence)> {
+        let last_idx = self.entries.len().checked_sub(1)?;
+        self.entries.swap(idx, last_idx);
+        let removed = self.entries.pop()?;
+        self.positions.remove(&removed.0);
+
+        if idx < self.entries.len() {
+            let moved_order_id = self.entries[idx].0;
+            self.positions.insert(moved_order_id, idx);
+        }
+        Some(removed)
+    }
+}
 
 #[derive(Default)]
 pub struct InMemoryPriceBook {
@@ -29,14 +82,12 @@ impl InMemoryPriceBook {
         order_index: &mut HashMap<OrderId, (Side, Price)>,
     ) {
         match side {
-            Side::Buy => bids
-                .entry(price)
-                .or_default()
-                .push_back((order_id, time_priority)),
-            Side::Sell => asks
-                .entry(price)
-                .or_default()
-                .push_back((order_id, time_priority)),
+            Side::Buy => {
+                bids.entry(price).or_default().push(order_id, time_priority)
+            }
+            Side::Sell => {
+                asks.entry(price).or_default().push(order_id, time_priority)
+            }
         }
         order_index.insert(order_id, (side, price));
     }
@@ -59,12 +110,7 @@ impl InMemoryPriceBook {
                 (best_bid, q)
             }
         };
-        let idx = q
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, (_, seq))| *seq)
-            .map(|(i, _)| i)?;
-        let (order_id, _) = q.remove(idx)?;
+        let order_id = q.pop_min_sequence()?;
         if q.is_empty() {
             match side {
                 Side::Buy => {
@@ -91,8 +137,7 @@ impl InMemoryPriceBook {
             Side::Sell => asks,
         };
         let should_remove_level = if let Some(q) = levels.get_mut(&price) {
-            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
-                q.remove(pos).unwrap();
+            if q.remove_by_id(order_id).is_some() {
                 q.is_empty()
             } else {
                 return false;
@@ -206,13 +251,13 @@ impl InMemoryPriceBook {
         let bid_qty: Quantity = self
             .bids
             .values()
-            .flat_map(|q| q.iter())
+            .flat_map(LevelQueue::iter)
             .filter_map(|&(id, _)| resolve(id))
             .sum();
         let ask_qty: Quantity = self
             .asks
             .values()
-            .flat_map(|q| q.iter())
+            .flat_map(LevelQueue::iter)
             .filter_map(|&(id, _)| resolve(id))
             .sum();
         bid_qty + ask_qty
