@@ -286,6 +286,27 @@ Tradeoffs:
 
 - Slightly more complex benchmark code for buffer lifecycle management, with no clear immediate throughput win.
 
+#### Priority 5 result: cleaner profiling workflow and artifacts
+
+What we tried:
+
+- Standardized profiling with frame pointers, bench debug symbols, CPU pinning, and `--noplot`.
+- Added a focused artifact for one benchmark function:
+  - `docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg`
+
+What worked:
+
+- The new command is reproducible and easier to rerun with the same context.
+- Focusing on one function at a time reduces unrelated benchmark noise in flamegraph review.
+
+What did not work:
+
+- On this Linux setup, `perf` still reported restricted kernel symbols and one dropped chunk, so some low-level frames can remain unresolved.
+
+Tradeoffs:
+
+- Cleaner flamegraphs require stricter run conditions (core pinning, fewer background tasks), which can make absolute throughput values from that run less representative of normal multi-core throughput.
+
 ---
 
 ## Tokio harness binaries
@@ -309,23 +330,18 @@ Reference run on the same machine:
 
 ## Profiling (engine hot path)
 
-Release build, pinned CPU, frame pointers:
+Recommended profile workflow for cleaner hotspot attribution:
 
 ```bash
 export RUSTFLAGS="-C force-frame-pointers=yes"
-cargo flamegraph -p omer --bench throughput_engine --features harness -- --bench
+export CARGO_PROFILE_BENCH_DEBUG=true
+taskset -c 2 cargo flamegraph -p omer --bench throughput_sharded_mixed --features harness,parallel --freq 997 --output docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg -- --bench --noplot --sample-size 10 --warm-up-time 0.2 --measurement-time 0.5 inmemory
 ```
 
 For the sharded mixed path, a sample flamegraph artifact is included at:
 
 - [`docs/perf/flamegraph-throughput_sharded_mixed.svg`](docs/perf/flamegraph-throughput_sharded_mixed.svg)
-
-Command used:
-
-```bash
-export RUSTFLAGS="-C force-frame-pointers=yes"
-cargo flamegraph -p omer --bench throughput_sharded_mixed --features harness,parallel --output docs/perf/flamegraph-throughput_sharded_mixed.svg -- --bench --noplot --sample-size 10 --warm-up-time 0.1 --measurement-time 0.2
-```
+- [`docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg`](docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg)
 
 Alternatives: `perf record` + flame graph tooling (see earlier commits or team runbooks). Attach machine type, `rustc -V`, and git SHA with any numbers.
 
