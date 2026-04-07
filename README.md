@@ -167,12 +167,46 @@ One **release** run on **Linux 6.5**, **rustc 1.94.1**, **Intel i7-13650HX (20 C
 | `integrity_stress` / randomish stream | **~3.75 ms** | Per iteration; includes invariant check |
 | `observability_overhead` / noop vs collecting add | **~189 ns vs ~141 ns** | Overlapping CIs—treat delta as noisy at this sampling depth |
 | `parallel_best_quotes` / sequential vs `rayon` | **~710 ns vs ~19.9 µs** | 256 tiny books: parallel fork/join dominates; scale up book count or work per book to see win |
-| `throughput_sharded_add` / 20 shards add-only | **~19.1 Melem/s** | Aggregate across shards; still far from 1B ops/s without further batching/layout work |
-| `throughput_sharded_book_push` / 20 shards same-price FIFO | **~57.8 Melem/s** | Upper bound (book-only). Distinct prices median was **~23.8 Melem/s** |
-| `throughput_sharded_mixed` / 20 shards + `OrderId -> shard` index | **~2.39 Melem/s** | More realistic mixed path; routing lookups + mixed command costs are visible |
-| `lock_read_heavy` / std vs parking_lot vs tokio RwLock | **~54.5 / ~52.7 / ~25.9 Melem/s** | This synthetic read-heavy test favors sync locks; async lock costs more per op |
+| `throughput_sharded_add` / 20 shards add-only | **~19,100,000 operations per second** | Aggregate across shards; still far from 1B ops/s without further batching/layout work |
+| `throughput_sharded_book_push` / 20 shards same-price FIFO | **~57,800,000 operations per second** | Upper bound (book-only). Distinct prices median was **~23,800,000 operations per second** |
+| `throughput_sharded_mixed` / 20 shards + `OrderId -> shard` index | **~2,390,000 operations per second** | More realistic mixed path; routing lookups + mixed command costs are visible |
+| `lock_read_heavy` / std vs parking_lot vs tokio RwLock | **~54,500,000 / ~52,700,000 / ~25,900,000 operations per second** | This synthetic read-heavy test favors sync locks; async lock costs more per op |
 
 `micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
+
+### Where we are now (clear answer)
+
+Best measured combinations on this machine (using current benchmark suite):
+
+- **Highest raw book throughput (book-only upper bound):**
+  - `DashSkipOrderBook` on `throughput_sharded_book_push` same-price case: about **57,800,000 operations per second**
+- **Best mixed-workload throughput (more realistic flow):**
+  - `InMemoryPriceBook` on `throughput_sharded_mixed`: about **2,295,600 to 2,446,400 operations per second** after Priority 1-4 changes
+- **Best single-operation latency among book backends in listed runs:**
+  - `latency_cancel` fastest value: about **72 nanoseconds**
+  - `latency_add` fastest value: about **350 nanoseconds**
+  - `latency_market` fastest value: about **111 nanoseconds**
+- **Memory hot-path indicator:**
+  - `memory_hot_path` stayed around **100 nanoseconds** wall time in the instrumented add+cancel benchmark; use the benchmark source as the truth for allocation semantics.
+
+Current measured status on this machine:
+
+- Current mixed throughput is around **2.3 to 2.4 million operations per second**.
+- The realistic path still needs algorithm and data-structure improvements for higher sustained throughput.
+
+### Deployment-style quick answer
+
+If you want one practical answer for this machine:
+
+- For a realistic mixed workload, the current measured envelope is about **2.3 to 2.4 million orders per second**.
+- At **2.3 million orders/second**:
+  - ingesting **700,000,000** orders takes about **304,000 ms** (about **5.1 minutes**),
+  - ingesting **1,000,000,000** orders takes about **435,000 ms** (about **7.2 minutes**).
+
+For context only (less realistic upper bounds from narrower benchmarks):
+
+- Book-only push path peak around **57.8 million orders/second** would imply about **12,100 ms** for 700,000,000 orders.
+- Sharded add-only path around **19.1 million orders/second** would imply about **36,600 ms** for 700,000,000 orders.
 
 ### Flamegraph priority rollout log (ordered steps)
 
@@ -338,12 +372,31 @@ export CARGO_PROFILE_BENCH_DEBUG=true
 taskset -c 2 cargo flamegraph -p omer --bench throughput_sharded_mixed --features harness,parallel --freq 997 --output docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg -- --bench --noplot --sample-size 10 --warm-up-time 0.2 --measurement-time 0.5 inmemory
 ```
 
+If you want kernel frames to resolve more completely on Linux, run:
+
+```bash
+sudo sysctl -w kernel.perf_event_paranoid=1
+sudo sysctl -w kernel.kptr_restrict=0
+```
+
+Then re-run the flamegraph command. For persistence across reboots, add these keys in `/etc/sysctl.d/*.conf`.
+
 For the sharded mixed path, a sample flamegraph artifact is included at:
 
 - [`docs/perf/flamegraph-throughput_sharded_mixed.svg`](docs/perf/flamegraph-throughput_sharded_mixed.svg)
 - [`docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg`](docs/perf/flamegraph-throughput_sharded_mixed-inmemory-clean.svg)
 
 Alternatives: `perf record` + flame graph tooling (see earlier commits or team runbooks). Attach machine type, `rustc -V`, and git SHA with any numbers.
+
+### Candidate improvements after Priority 5
+
+Likely high-impact areas to reduce complexity and improve speed:
+
+- Replace per-level linear queue search in the remaining remove paths with stable location indexing where possible.
+- Evaluate narrower data in hot structs (for example, smaller integer types where safe) to improve cache density.
+- Prototype `SmallVec` for very short command batches or temporary vectors that are frequently tiny.
+- Compare `tokio::mpsc` versus `crossbeam-channel` only on paths that are not forced to be async (sync dispatch can be cheaper).
+- Remove repeated work in routing and parsing by reusing parsed command buffers and reducing map churn.
 
 ---
 
