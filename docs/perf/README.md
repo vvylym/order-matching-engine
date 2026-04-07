@@ -17,4 +17,8 @@ Notes for reproducibility:
   - use `--noplot`,
   - filter to one bench function when investigating one hotspot.
 - On Linux, `perf` permissions (`perf_event_paranoid`, `kptr_restrict`) can affect symbol resolution.
+- To improve low-level frame resolution on Linux:
+  - `sudo sysctl -w kernel.perf_event_paranoid=1`
+  - `sudo sysctl -w kernel.kptr_restrict=0`
+  - then re-run the profiling command.
 - If samples are dropped under load, re-run with fewer background tasks or a longer measurement window.
