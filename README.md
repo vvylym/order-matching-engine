@@ -364,6 +364,27 @@ Tradeoffs:
 
 - More protocol strictness and explicit routing metadata improve correctness and diagnosability, at the cost of slightly more wire payload and parsing logic.
 
+#### Priority 7 result: deeper remove-path indexing candidate (`p2`)
+
+What we tried:
+
+- Reworked harness in-memory price levels to use an indexed level queue (`order_id -> position`) instead of linear `position` scans on cancel/remove.
+- Kept external `PriceBook` behavior unchanged while tightening the remove hot path internals.
+
+What worked:
+
+- Remove-by-id now resolves directly through per-level index metadata and avoids repeated queue scans.
+- CI, quality gate, and full test suite remained green with no correctness regression.
+
+What did not work:
+
+- In this short benchmark window, mixed throughput did not show a statistically significant win (`No change in performance detected`).
+
+Tradeoffs:
+
+- The indexed queue carries extra bookkeeping (index updates on swaps/removals) and higher implementation complexity.
+- Keep this as a measured candidate rather than a guaranteed throughput improvement across environments.
+
 ---
 
 ## Tokio harness binaries
