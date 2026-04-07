@@ -2,14 +2,26 @@
 //! These tests only guard that ITCH/matching bench targets stay registered in `Cargo.toml` and README.
 
 #[test]
-fn cargo_toml_lists_matching_and_latency_benches() {
+fn cargo_toml_lists_bench_targets() {
     let cargo = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml"));
     for name in [
         "matching_engine",
+        "micro",
+        "market_manager",
         "latency_add",
+        "latency_cancel",
+        "latency_replace",
+        "latency_market",
         "itch_parse",
         "throughput_book",
         "throughput_engine",
+        "throughput_mixed",
+        "throughput_adversarial",
+        "correctness",
+        "memory_hot_path",
+        "integrity_stress",
+        "observability_overhead",
+        "parallel_best_quotes",
     ] {
         assert!(
             cargo.contains(name),

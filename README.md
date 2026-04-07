@@ -97,13 +97,51 @@ Disable harness: `omer = { version = "…", default-features = false }`.
 
 | Bench | Command | What it does |
 |-------|---------|----------------|
-| `throughput_engine` | `cargo bench -p omer --bench throughput_engine` | Warm book + `process_batch` (512 GTC buys), **four** `PriceBook` backends, `NoOpEventSink` |
-| `latency_add` | `cargo bench -p omer --bench latency_add` | One resting `add` per iteration, same four backends, collecting sink |
-| `throughput_book` | `cargo bench -p omer --bench throughput_book` | `DashSkipOrderBook::push` only (ids; no engine) |
-| `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on AddOrder buffer |
-| `micro`, `matching_engine`, `market_manager` | same pattern | Smoke / placeholder loops; see [`benches/PLAN.md`](benches/PLAN.md) |
+| `throughput_engine` | `cargo bench -p omer --features harness --bench throughput_engine` | Warm book + `process_batch` (512 GTC limit buys), four `PriceBook` backends, `NoOpEventSink` |
+| `throughput_mixed` | `cargo bench -p omer --features harness --bench throughput_mixed` | 512-op round: mostly adds, cancels, occasional resting sell + IOC buy; `InMemoryPriceBook` |
+| `throughput_adversarial` | `cargo bench -p omer --features harness --bench throughput_adversarial` | 5k distinct sell levels on `DashSkipOrderBook` + 256 market IOC sweeps per iteration |
+| `throughput_book` | `cargo bench -p omer --bench throughput_book` | `DashSkipOrderBook::push` only (50k ids); FIFO at one price vs distinct prices |
+| `latency_add` | `cargo bench -p omer --features harness --bench latency_add` | One resting `add` per iteration, four backends, `NoOpEventSink` |
+| `latency_cancel` | `cargo bench -p omer --features harness --bench latency_cancel` | Add + `cancel_by_order_id` on that id each iteration (cycle cost) |
+| `latency_replace` | `cargo bench -p omer --features harness --bench latency_replace` | Add + `replace` each iteration |
+| `latency_market` | `cargo bench -p omer --features harness --bench latency_market` | Resting limit sell + IOC market buy cross each iteration |
+| `correctness` | `cargo bench -p omer --bench correctness` | 256× minimal-engine replays + top-of-book checksum xor per Criterion iter |
+| `memory_hot_path` | `cargo bench -p omer --bench memory_hot_path` | `allocation_counter::measure` around warm add+cancel on stable id (wall time + alloc hook) |
+| `integrity_stress` | `cargo bench -p omer --bench integrity_stress` | Deterministic mixed ops + `assert_uncrossed` (Criterion needs `--sample-size` ≥ 10) |
+| `observability_overhead` | `cargo bench -p omer --features harness --bench observability_overhead` | Same add pattern: `NoOpEventSink` vs collecting harness sink |
+| `parallel_best_quotes` | `cargo bench -p omer --features parallel --bench parallel_best_quotes` | 256 `BTreeOrderBook` instances: sequential best-quote scan vs `par_best_quotes` |
+| `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on 50k AddOrder packets in one buffer |
+| `micro` | `cargo bench -p omer --bench micro` | Near-no-op Criterion smoke (picosecond-scale; not engine work) |
+| `matching_engine`, `market_manager` | same pattern | ITCH-shaped smoke benches |
 
-CI compiles all benches with `cargo bench --no-run --workspace --all-features` but does not report Criterion output.
+CI compiles benches with `cargo bench --no-run --workspace --all-features` but does not publish Criterion HTML.
+
+### Observed results (reference machine)
+
+One **release** run on **Linux 6.5**, **rustc 1.94.1**, with Criterion short sampling (`--sample-size 10`, ~0.15–0.25 s measurement). Values are **medians** (middle of Criterion’s printed `[lower, estimate, upper]` interval)—use for regression trending, not as absolute guarantees.
+
+| Bench / function | Median | Notes |
+|------------------|--------|--------|
+| `itch_parse` / 50k add messages | **~191 µs** | ~262M decoded msgs/s of this fixture shape |
+| `throughput_book` / same-price FIFO, 50k `push` | **~2.15 ms** | ~23M pushes/s |
+| `throughput_book` / distinct prices, 50k `push` | **~10.6 ms** | ~4.7M pushes/s |
+| `throughput_engine` / `process_batch` 512 ops, inmemory | **~171 µs** | ~3.0M engine adds/s (batch) |
+| `throughput_engine` / btree | **~247 µs** | |
+| `throughput_engine` / pool_level | **~264 µs** | |
+| `throughput_engine` / dash_skip | **~131 µs** | |
+| `latency_add` / inmemory … dash_skip | **~350 … ~512 ns** | Resting limit add, noop sink |
+| `latency_cancel` / inmemory … dash_skip | **~72 … ~254 ns** | Full add+cancel cycle |
+| `latency_replace` / inmemory … dash_skip | **~257 … ~522 ns** | Add+replace |
+| `latency_market` / inmemory … dash_skip | **~111 … ~285 ns** | Limit sell + IOC buy cross |
+| `throughput_mixed` / 512-op round | **~41 µs** | ~12.5M “elements”/s (Criterion throughput tag) |
+| `throughput_adversarial` / 5256 ops | **~1.35 ms** | Deep book + sweeps |
+| `correctness` / 256 replays | **~88.8 µs** | Per-iter cost of 256× `replay_once` |
+| `memory_hot_path` / instrumented add+cancel | **~100 ns** | Wall time under `allocation-counter`; see bench source for alloc semantics |
+| `integrity_stress` / randomish stream | **~3.75 ms** | Per iteration; includes invariant check |
+| `observability_overhead` / noop vs collecting add | **~189 ns vs ~141 ns** | Overlapping CIs—treat delta as noisy at this sampling depth |
+| `parallel_best_quotes` / sequential vs `rayon` | **~710 ns vs ~19.9 µs** | 256 tiny books: parallel fork/join dominates; scale up book count or work per book to see win |
+
+`micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
 
 ---
 
@@ -113,7 +151,7 @@ Release build, pinned CPU, frame pointers:
 
 ```bash
 export RUSTFLAGS="-C force-frame-pointers=yes"
-cargo flamegraph --bench throughput_engine --features harness -- --bench
+cargo flamegraph -p omer --bench throughput_engine --features harness -- --bench
 ```
 
 Alternatives: `perf record` + flame graph tooling (see earlier commits or team runbooks). Attach machine type, `rustc -V`, and git SHA with any numbers.
