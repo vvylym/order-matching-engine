@@ -14,6 +14,7 @@
 //! 1. [`types`] — `Order`, `Price`, `Quantity`, sides, time-in-force.
 //! 2. [`engine`] — commands such as [`OrderCommand`](engine::OrderCommand) (see `engine/models.rs` in source).
 //! 3. [`engine::OrderMatchingEngine`] — wires policies, book, and store; batch feeds via **[`OrderMatchingEngine::process_batch`](engine::OrderMatchingEngine::process_batch)**.
+//!    For composition-based setup, use [`engine::builder()`](engine::builder).
 //! 4. [`pool`] — optional `Order` shell recycling for adapters.
 //! 5. **[`parallel`]** (feature **`parallel`**) — read-mostly `rayon` helpers; the book stays single-writer.
 //!
@@ -22,6 +23,10 @@
 //! Integration tests build a real engine with in-memory structures. Those live under the
 //! **`harness`** feature (enabled by default): **[`harness`]**, including [`harness::engine_with_book`]
 //! to swap [`book::PriceBook`] implementations for comparable benches.
+//!
+//! Benchmark-harness binaries live under `src/bin/`:
+//! - `server`: shard-aware Tokio harness endpoint
+//! - `client`: load generator for local throughput/latency experiments
 //!
 //! # Unsafe
 //!

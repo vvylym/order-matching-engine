@@ -1,9 +1,11 @@
 //! Engine module
 //!
 
+mod builder;
 mod models;
 mod service;
 
+pub use builder::*;
 pub use models::*;
 pub use service::*;
 

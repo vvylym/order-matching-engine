@@ -1,17 +1,24 @@
 //! Unit tests for traits, commands, and error surfaces.
 
 use crate::book::PriceBook;
+use crate::book::service::BTreeOrderBook;
 use crate::engine::{
     AddOrderCommand, CancelByOrderIdCommand, CancelOrderCommand,
     ExecuteOrderCommand, OrderCommand, OrderMatchingService, ReduceOrderCommand,
-    ReplaceOrderByNewIdCommand, ReplaceOrderCommand,
+    ReplaceOrderByNewIdCommand, ReplaceOrderCommand, builder,
 };
 use crate::error::{Error, RejectionError, Result};
-use crate::events::{Event, EventSinkError};
-use crate::matching::{MatchingPolicy, MatchingPolicyError};
+use crate::events::{Event, EventSinkError, NoOpEventSink};
+use crate::matching::{
+    MatchingPolicy, MatchingPolicyError, PriceCrossMatchingPolicy,
+};
+use crate::self_trade::AllowAllSelfTradePolicy;
 use crate::self_trade::SelfTradePolicyError;
-use crate::sequence::{SequenceGenerator, SequenceGeneratorError};
+use crate::sequence::{
+    CounterSequenceGenerator, SequenceGenerator, SequenceGeneratorError,
+};
 use crate::store::OrderStoreError;
+use crate::store::service::HashMapOrderStore;
 use crate::types::*;
 
 // --- OrderMatchingService default `process` path ---
@@ -274,6 +281,53 @@ fn top_level_error_from_sources() {
     assert!(e.to_string().contains("event"));
     let e: Error = RejectionError::StaleSequence.into();
     assert!(e.to_string().contains("rejection"));
+}
+
+#[test]
+fn engine_builder_builds_equivalent_default_components() {
+    let mut engine = builder()
+        .with_sequence_generator(CounterSequenceGenerator::new())
+        .with_price_book(BTreeOrderBook::new())
+        .with_order_store(HashMapOrderStore::new())
+        .with_matching_policy(PriceCrossMatchingPolicy)
+        .with_self_trade_policy(AllowAllSelfTradePolicy)
+        .with_event_sink(NoOpEventSink)
+        .build();
+
+    engine.add(sample_add_cmd()).unwrap();
+    assert_eq!(engine.best_bid(), Some(100));
+}
+
+#[test]
+fn engine_builder_supports_custom_component_wiring() {
+    let mut engine = builder()
+        .with_sequence_generator(CountingSeq(0))
+        .with_price_book(BTreeOrderBook::new())
+        .with_order_store(HashMapOrderStore::new())
+        .with_matching_policy(PriceCrossMatchingPolicy)
+        .with_self_trade_policy(AllowAllSelfTradePolicy)
+        .with_event_sink(NoOpEventSink)
+        .build();
+
+    engine
+        .add(AddOrderCommand {
+            id: 77,
+            participant_id: 42,
+            symbol_id: 1,
+            side: Side::Sell,
+            order_type: OrderType::Limit,
+            price: Some(123),
+            quantity: 2,
+            time_in_force: TimeInForce::Gtc,
+            stop_price: None,
+            max_visible_quantity: None,
+            slippage: None,
+            trailing_distance: None,
+            trailing_step: None,
+        })
+        .unwrap();
+
+    assert_eq!(engine.best_ask(), Some(123));
 }
 
 // --- Types ---
