@@ -135,7 +135,7 @@ Disable harness: `omer = { version = "…", default-features = false }`.
 | `parallel_best_quotes` | `cargo bench -p omer --features parallel --bench parallel_best_quotes` | 256 `BTreeOrderBook` instances: sequential best-quote scan vs `par_best_quotes` |
 | `throughput_sharded_add` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_add` | Sharded add-only workload: one engine per shard, adds executed in parallel (`rayon`) |
 | `throughput_sharded_book_push` | `cargo bench -p omer --features parallel --bench throughput_sharded_book_push` | Sharded book-only `DashSkipOrderBook::push` in parallel; same-price FIFO vs distinct prices |
-| `throughput_sharded_mixed` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_mixed` | Sharded mixed flow with explicit `OrderId -> shard` index for cancel routing |
+| `throughput_sharded_mixed` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_mixed` | Sharded mixed flow with explicit `OrderId -> shard` index for cancel routing, measured on `InMemoryPriceBook`, `BTreeOrderBook`, and `DashSkipOrderBook` |
 | `lock_read_heavy` | `cargo bench -p omer --bench lock_read_heavy` | Read-heavy lock comparison: `Arc<std::sync::RwLock<_>>` vs `Arc<parking_lot::RwLock<_>>` vs `Arc<tokio::sync::RwLock<_>>` |
 | `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on 50k AddOrder packets in one buffer |
 | `micro` | `cargo bench -p omer --bench micro` | Near-no-op Criterion smoke (picosecond-scale; not engine work) |
@@ -235,6 +235,31 @@ What did not work:
 Tradeoffs:
 
 - Better route-index lifecycle behavior and simpler fast path, but no immediate benchmark win at this sampling depth.
+
+#### Priority 3 result: sharded mixed benchmark on multiple backends
+
+Median throughput from the same fixed benchmark command:
+
+- `InMemoryPriceBook`: about **2,379,900 operations per second**
+- `BTreeOrderBook`: about **1,565,500 operations per second**
+- `DashSkipOrderBook`: about **1,587,900 operations per second**
+
+What we tried:
+
+- Generalized the sharded mixed benchmark to run the same workload against three book backends.
+
+What worked:
+
+- We now get direct backend-to-backend numbers under one benchmark harness and one command.
+- The in-memory harness backend remained the fastest in this mixed test shape.
+
+What did not work:
+
+- This step is measurement-focused; it does not by itself improve throughput.
+
+Tradeoffs:
+
+- Longer benchmark runtime (three benchmark functions instead of one) in exchange for clearer backend parity data.
 
 ---
 

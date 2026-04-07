@@ -6,7 +6,11 @@
 use std::collections::{HashMap, VecDeque};
 use std::hint::black_box;
 
-use criterion::{Criterion, Throughput, criterion_group, criterion_main};
+use criterion::{
+    BenchmarkId, Criterion, Throughput, criterion_group, criterion_main,
+};
+use omer::book::PriceBook;
+use omer::book::service::{BTreeOrderBook, DashSkipOrderBook};
 use omer::engine::{
     AddOrderCommand, CancelByOrderIdCommand, OrderCommand, OrderMatchingService,
 };
@@ -18,21 +22,22 @@ use rayon::prelude::*;
 
 const OPS_PER_SHARD: u64 = 20_000;
 
-type ShardEngine = EngineWithBookNoOp<InMemoryPriceBook>;
 type AliveQueues = Vec<VecDeque<u64>>;
 type RoutedBatches = Vec<Vec<OrderCommand>>;
+type ShardEngine<PB> = EngineWithBookNoOp<PB>;
 
-struct ShardedRouter {
-    engines: Vec<ShardEngine>,
+#[allow(clippy::type_complexity)]
+struct ShardedRouter<PB: PriceBook + Default + Send> {
+    engines: Vec<ShardEngine<PB>>,
     order_to_shard: HashMap<u64, usize>,
     alive_ids: AliveQueues,
     next_order_id: u64,
 }
 
-impl ShardedRouter {
+impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
     fn new(shards: usize) -> Self {
         Self {
-            engines: (0..shards).map(|_| engine_with_book_noop()).collect(),
+            engines: (0..shards).map(|_| engine_with_book_noop::<PB>()).collect(),
             order_to_shard: HashMap::with_capacity(shards * 8_192),
             alive_ids: (0..shards).map(|_| VecDeque::new()).collect(),
             next_order_id: 1,
@@ -138,19 +143,33 @@ impl ShardedRouter {
     }
 }
 
+fn bench_backend<PB: PriceBook + Default + Send + 'static>(
+    group: &mut criterion::BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    backend_name: &str,
+    shards: usize,
+) {
+    let mut router = ShardedRouter::<PB>::new(shards);
+    group.bench_with_input(
+        BenchmarkId::new("order_id_indexed_add_cancel_market", backend_name),
+        &backend_name,
+        |b, _| {
+            b.iter(|| {
+                router.run_round();
+            });
+        },
+    );
+}
+
 fn throughput_sharded_mixed(c: &mut Criterion) {
     let shards = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
-    let mut router = ShardedRouter::new(shards);
 
     let mut group = c.benchmark_group("throughput_sharded_mixed");
     group.throughput(Throughput::Elements(OPS_PER_SHARD * shards as u64));
-    group.bench_function("order_id_indexed_add_cancel_market", |b| {
-        b.iter(|| {
-            router.run_round();
-        });
-    });
+    bench_backend::<InMemoryPriceBook>(&mut group, "inmemory", shards);
+    bench_backend::<BTreeOrderBook>(&mut group, "btree", shards);
+    bench_backend::<DashSkipOrderBook>(&mut group, "dash_skip", shards);
     group.finish();
 }
 
