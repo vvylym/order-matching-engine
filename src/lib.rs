@@ -34,6 +34,7 @@
 //! `// SAFETY:` plus review.
 
 pub mod book;
+pub mod distributed_wire;
 pub mod engine;
 pub mod error;
 pub mod events;

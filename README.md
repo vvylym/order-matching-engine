@@ -341,20 +341,44 @@ Tradeoffs:
 
 - Cleaner flamegraphs require stricter run conditions (core pinning, fewer background tasks), which can make absolute throughput values from that run less representative of normal multi-core throughput.
 
+#### Priority 6 result: distributed multi-instrument protocol foundation (`p1`)
+
+What we tried:
+
+- Introduced a shared typed wire protocol module in `src/distributed_wire.rs` used by both harness binaries.
+- Added explicit instrument-aware routing in the server with one matcher worker per instrument (`--instruments`, default 4).
+- Switched client emission to instrument-aware frames with configurable batch size (`--batch-size`) and optional `BATCH` line frames.
+
+What worked:
+
+- Gateway parse/validation now rejects malformed lines and invalid instrument IDs before dispatch.
+- Routing is deterministic (`instrument_id -> dedicated worker`) and cancel commands validate route consistency (`order_id` index + instrument match).
+- Matcher boundary checks ensure worker and command instrument IDs align before processing.
+
+What did not work:
+
+- This step establishes architecture/validation boundaries only; no throughput tuning was targeted in this priority.
+- Legacy ad-hoc line parsing path was removed, so older `CANCELID <order_id>` payloads must include instrument (`CANCELID <order_id> <instrument_id>`).
+
+Tradeoffs:
+
+- More protocol strictness and explicit routing metadata improve correctness and diagnosability, at the cost of slightly more wire payload and parsing logic.
+
 ---
 
 ## Tokio harness binaries
 
-This repo now includes a lightweight benchmark harness server and client:
+This repo includes a lightweight benchmark harness server and client:
 
-- `cargo run --bin server -- --bind 127.0.0.1:7001 --shards 8`
-- `cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --symbols 32 --duration-secs 8`
+- `cargo run --bin server -- --bind 127.0.0.1:7001 --instruments 4`
+- `cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 4 --batch-size 4 --duration-secs 8`
 
-Protocol is intentionally simple for measurement (not production API):
+Protocol is intentionally compact for measurement (not production API):
 
-- `ADD <id> <participant> <symbol> <B|S> <price> <qty>`
-- `MARKET <id> <participant> <symbol> <B|S> <qty>`
-- `CANCELID <order_id>`
+- `ADD <id> <participant> <instrument> <B|S> <price> <qty>`
+- `MARKET <id> <participant> <instrument> <B|S> <qty>`
+- `CANCELID <order_id> <instrument>`
+- `BATCH <cmd1>|<cmd2>|...` (optional multi-command frame)
 
 Reference run on the same machine:
 
