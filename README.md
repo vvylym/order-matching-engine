@@ -57,12 +57,23 @@ engine.process(cmd).expect("accepted");
 
 Composition via `omer::engine::builder()` is documented in crate rustdoc and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-Tokio harness (mixed load):
+Tokio harness — **duration stop** (wall time bound):
 
 ```bash
-cargo run --bin server -- --bind 127.0.0.1:7001 --instruments 4 --worker-channel tokio --price-book btree
-cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 4 --batch-size 4 --duration-secs 8
+cargo run --release --bin server -- --bind 127.0.0.1:7001 --instruments 32 --worker-channel tokio --price-book btree
+cargo run --release --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 32 --batch-size 8 --random --duration-secs 60
 ```
+
+Tokio harness — **operation-count stop** (reports **measured** `wall_time_s` until `ok_ops` ≥ target; no fixed duration):
+
+```bash
+cargo run --release --bin server -- --bind 127.0.0.1:7001 --instruments 32 --worker-channel tokio --price-book dash_skip
+cargo run --release --bin client -- \
+  --addr 127.0.0.1:7001 --connections 4 --instruments 32 --batch-size 8 \
+  --random --seed 42 --target-ok-ops 10000000
+```
+
+**Harness `server` matcher type:** workers use a concrete `enum MatcherEngine { Btree(..), DashSkip(..), PoolLevel(..) }` that forwards to [`OrderMatchingEngine`](src/engine/service.rs). There is **no** `Box<dyn OrderMatchingService>` on the matcher hot path. **`Arc` is not a substitute** for the matcher value here: each instrument worker must hold **exclusive** `&mut` access to its own engine and mutate book/store state; `Arc` shares **immutable** ownership and would still require interior mutability (`Mutex`/`RwLock`) and contention on every command.
 
 Local quality gates:
 
@@ -90,26 +101,44 @@ make quality-gate
 
 - **Matching:** [`OrderMatchingService`](src/engine/mod.rs) — process `OrderCommand` values (`Add`, `Cancel`, `Replace`, `CancelByOrderId`, etc.).
 - **Harness `server`:** parse wire frames, route by instrument, dispatch to workers.
-- **Harness `client`:** generate mixed workloads; print op and latency counters.
+- **Harness `client`:** generate workloads (`--random` = stochastic mix of limits / cancels / markets across instruments); print op and latency counters.
 
 ## Benchmarks
 
-**How results here were measured**
+### How these numbers were produced (no interpolation)
 
-- End-to-end **Tokio harness** (not in-process Criterion only).
-- **4** concurrent clients (`--connections 4`).
-- Fixed duration **8** seconds per run (`--duration-secs 8`).
-- Mixed workload shape: add / cancel-by-id / market with **`--batch-size 4`** on the client.
-- Server: **`--worker-channel tokio`**, **`--instruments 4`**.
-- Table uses **total operations tested** = `ok_ops + err_ops` from the client line (includes protocol rejections in the harness path).
+Each table row is **one real end-to-end run** on this host:
 
-**Top 3 engine settings** (PriceBook × OrderStore × EventSink), same harness flags otherwise:
+- **Build:** `cargo build --release --bin server --bin client`
+- **Stop rule:** `--target-ok-ops N` — clients exit once aggregate **`ok_ops` ≥ N** (tiny overshoot is possible because batches are applied atomically per frame).
+- **Measured quantity:** client line `wall_time_s=…` is **actual elapsed wall time** for that run (not `N / throughput`).
+- **Load:** `--connections 4`, `--instruments 32`, `--batch-size 8`, **`--random`**, **`--seed 42`** (reproducible RNG; mix is not a fixed mod-10 pattern).
+- **Server:** `--worker-channel tokio`; `--instruments 32` matches the client’s routing range.
+- **Store / sink:** `HashMapOrderStore`, `NoOpEventSink` (server defaults for the harness).
 
-| PriceBook | OrderStore | EventSink | Clients | Ops tested (`ok_ops + err_ops`) | Total time |
-| --- | --- | --- | ---: | ---: | ---: |
-| `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 2,041,836 | 8s |
-| `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 2,019,472 | 8s |
-| `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 1,957,996 | 8s |
+**500M rows:** a full 500 M–command run was **not** retained in this documentation refresh: a long `dash_skip` attempt drove very large resident memory on this machine. Re-run locally when you have headroom, using the same command pattern as below and your chosen `--price-book` / `--instruments`.
+
+```bash
+cargo run --release --bin server -- --bind 127.0.0.1:7001 --instruments 32 --price-book dash_skip --worker-channel tokio
+cargo run --release --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 32 --batch-size 8 --random --seed 42 --target-ok-ops 500000000
+```
+
+### Measured throughput ladder (target `ok_ops` vs wall time)
+
+| Target `ok_ops` (stop) | `ok_ops` (actual) | Wall time (s) | PriceBook | OrderStore | EventSink | Clients | Instruments | Random |
+| ---: | ---: | ---: | --- | --- | --- | ---: | ---: | --- |
+| 1,000,000 | 1,000,024 | 0.851107 | `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 10.046481 | `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 94.083841 | `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 100,000,000 | 100,000,024 | 327.418597 | `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 1,000,000 | 1,000,024 | 1.046007 | `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 11.986405 | `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 100.141284 | `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 100,000,000 | 100,000,024 | 334.108022 | `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 1,000,000 | 1,000,024 | 0.907989 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 11.853820 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 105.312649 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
+| 100,000,000 | 100,000,024 | 344.068611 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
 
 ## Contributing
 
