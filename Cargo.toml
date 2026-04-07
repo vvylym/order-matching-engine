@@ -117,3 +117,13 @@ required-features = ["harness"]
 name = "parallel_best_quotes"
 harness = false
 required-features = ["parallel"]
+
+[[bench]]
+name = "throughput_sharded_add"
+harness = false
+required-features = ["harness", "parallel"]
+
+[[bench]]
+name = "throughput_sharded_book_push"
+harness = false
+required-features = ["parallel"]

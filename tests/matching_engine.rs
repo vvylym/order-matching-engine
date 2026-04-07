@@ -22,6 +22,8 @@ fn cargo_toml_lists_bench_targets() {
         "integrity_stress",
         "observability_overhead",
         "parallel_best_quotes",
+        "throughput_sharded_add",
+        "throughput_sharded_book_push",
     ] {
         assert!(
             cargo.contains(name),

@@ -110,6 +110,8 @@ Disable harness: `omer = { version = "…", default-features = false }`.
 | `integrity_stress` | `cargo bench -p omer --bench integrity_stress` | Deterministic mixed ops + `assert_uncrossed` (Criterion needs `--sample-size` ≥ 10) |
 | `observability_overhead` | `cargo bench -p omer --features harness --bench observability_overhead` | Same add pattern: `NoOpEventSink` vs collecting harness sink |
 | `parallel_best_quotes` | `cargo bench -p omer --features parallel --bench parallel_best_quotes` | 256 `BTreeOrderBook` instances: sequential best-quote scan vs `par_best_quotes` |
+| `throughput_sharded_add` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_add` | Sharded add-only workload: one engine per shard, adds executed in parallel (`rayon`) |
+| `throughput_sharded_book_push` | `cargo bench -p omer --features parallel --bench throughput_sharded_book_push` | Sharded book-only `DashSkipOrderBook::push` in parallel; same-price FIFO vs distinct prices |
 | `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on 50k AddOrder packets in one buffer |
 | `micro` | `cargo bench -p omer --bench micro` | Near-no-op Criterion smoke (picosecond-scale; not engine work) |
 | `matching_engine`, `market_manager` | same pattern | ITCH-shaped smoke benches |
@@ -118,7 +120,7 @@ CI compiles benches with `cargo bench --no-run --workspace --all-features` but d
 
 ### Observed results (reference machine)
 
-One **release** run on **Linux 6.5**, **rustc 1.94.1**, with Criterion short sampling (`--sample-size 10`, ~0.15–0.25 s measurement). Values are **medians** (middle of Criterion’s printed `[lower, estimate, upper]` interval)—use for regression trending, not as absolute guarantees.
+One **release** run on **Linux 6.5**, **rustc 1.94.1**, **Intel i7-13650HX (20 CPUs)**, with Criterion short sampling (`--sample-size 10`, ~0.15–0.25 s measurement). Values are **medians** (middle of Criterion’s printed `[lower, estimate, upper]` interval)—use for regression trending, not as absolute guarantees.
 
 | Bench / function | Median | Notes |
 |------------------|--------|--------|
@@ -140,6 +142,8 @@ One **release** run on **Linux 6.5**, **rustc 1.94.1**, with Criterion short sam
 | `integrity_stress` / randomish stream | **~3.75 ms** | Per iteration; includes invariant check |
 | `observability_overhead` / noop vs collecting add | **~189 ns vs ~141 ns** | Overlapping CIs—treat delta as noisy at this sampling depth |
 | `parallel_best_quotes` / sequential vs `rayon` | **~710 ns vs ~19.9 µs** | 256 tiny books: parallel fork/join dominates; scale up book count or work per book to see win |
+| `throughput_sharded_add` / 20 shards add-only | **~19.1 Melem/s** | Aggregate across shards; still far from 1B ops/s without further batching/layout work |
+| `throughput_sharded_book_push` / 20 shards same-price FIFO | **~57.8 Melem/s** | Upper bound (book-only). Distinct prices median was **~23.8 Melem/s** |
 
 `micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
 
