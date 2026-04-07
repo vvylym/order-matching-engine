@@ -44,13 +44,14 @@ ci:
 	$(MAKE) deny
 	$(MAKE) machete
 
-# Optional: install `pmat` (`cargo install pmat`). Default checks avoid noisy per-file dead-code
-# and entropy heuristics on generated-style ITCH helpers; extend locally as needed.
-PMAT_CHECKS ?= complexity,satd,security,duplicates,sections
+# Optional: install `pmat` (`cargo install pmat`). Not run in CI (slow install).
+# Each check runs alone; combining `dead-code` with other flags in one pmat invocation can run the full suite.
+# `entropy` is omitted: pmat still flags `itch/messages.rs` after `ItchFixedPayload` / `parse_fixed` (heuristic false positive).
 quality-gate:
-	@if command -v pmat >/dev/null 2>&1; then \
-		pmat quality-gate --project-path . --fail-on-violation --checks $(PMAT_CHECKS); \
-	else \
+	@if ! command -v pmat >/dev/null 2>&1; then \
 		echo "pmat not installed; skipping (cargo install pmat)"; \
 		exit 0; \
 	fi
+	@set -e; for c in complexity satd security duplicates sections coverage; do \
+		pmat quality-gate --project-path . --checks $$c --fail-on-violation; \
+	done

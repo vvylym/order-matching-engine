@@ -1,13 +1,13 @@
 # Benchmark plan: per-category benches
 
-Design notes for **Criterion** targets under `benches/`. Sections marked with legacy “§” numbers describe **goals**, not necessarily what is implemented today. For **current** bench behavior, see the [README](../README.md) “Benchmarks and performance” table.
+Design notes for **Criterion** targets under `benches/`. Sections marked with legacy “§” numbers describe **goals**, not necessarily what is implemented today. For **current** bench behavior and **reference numbers**, see the [README](../README.md) section **Benchmarks (what they measure)** and **Observed results (reference machine)**.
 
 ### North star: 10⁹+ in-process operations per second (matcher + book)
 
 **10⁹+ ops/s** is a **CPU/program target** for the **order book + matcher** when scaled with **sharding, batching, many cores, and micro-optimizations** (see README phases 1–4). It is **not** the same as a single-thread bench on a laptop; it **excludes** network I/O by definition for this number.
 
 1. **Book hot path** — [`throughput_book`](throughput_book.rs) on [`DashSkipOrderBook`](../src/book/service/dash_skip.rs); later `OrderPool`, batch APIs, `rayon`, sharded book, SIMD (README roadmap).
-2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/stream.rs).
+2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/messages.rs).
 3. **Full engine** — `latency_*`, [`throughput_engine`](throughput_engine.rs), future `throughput_mixed` on [`OrderMatchingEngine`](../src/engine/service.rs).
 4. **Gateway / wire** — separate measurement when that binary exists; do not conflate with matcher-only figures.
 
@@ -170,64 +170,14 @@ Future **multi-instrument** orchestration (e.g. a **MarketManager** façade over
 | Throughput            | `throughput_mixed.rs`      | ops/sec (2–5M respectable, 10M pride)         |
 |                       | `throughput_adversarial.rs`| ops/sec with deep book / heavy cancel         |
 | Memory                | `memory_hot_path.rs`       | 0 allocs after warm-up                        |
-| Market integrity      | `integrity_stress.rs`      | Optional; events/sec, 0 violations            |
-| Observability         | `observability_overhead.rs`| Optional; sink overhead                       |
+| Market integrity      | `integrity_stress.rs`      | Implemented; deterministic stream + `assert_uncrossed` |
+| Observability         | `observability_overhead.rs`| Implemented; noop vs collecting sink on same add workload |
+| Engine batch / books  | `throughput_engine.rs`     | Warm book + `process_batch` (512 ops), four backends |
+| Book-only / decode    | `throughput_book.rs`, `itch_parse.rs` | Implemented |
+| Multi-book reads      | `parallel_best_quotes.rs`  | Feature **`parallel`**; sequential vs `par_best_quotes` |
 
-**Suggested `Cargo.toml` additions:**
+**`Cargo.toml`:** `[[bench]]` entries and `criterion` / `allocation-counter` dev-dependencies live in the repo root `Cargo.toml` (`autobenches = false` so `benches/util.rs` is not a standalone bench crate).
 
-```toml
-[dev-dependencies]
-# ... existing ...
-criterion = { version = "0.5", features = ["html_reports"] }
-
-[[bench]]
-name = "correctness"
-harness = false
-
-[[bench]]
-name = "latency_add"
-harness = false
-
-[[bench]]
-name = "latency_cancel"
-harness = false
-
-[[bench]]
-name = "latency_replace"
-harness = false
-
-[[bench]]
-name = "latency_market"
-harness = false
-
-[[bench]]
-name = "throughput_mixed"
-harness = false
-
-[[bench]]
-name = "throughput_adversarial"
-harness = false
-
-[[bench]]
-name = "memory_hot_path"
-harness = false
-# Optional:
-# [[bench]]
-# name = "integrity_stress"
-# harness = false
-# [[bench]]
-# name = "observability_overhead"
-# harness = false
-```
-
-**Implementation order (suggested):**
-
-1. Add feature `bench` (or equivalent) and shared engine construction so that benches can build `EngineWithMemory` (or equivalent) with a no-op/minimal sink for latency/throughput.
-2. Add Criterion and `[[bench]]` entries.
-3. Implement **latency_*** (add, cancel, replace, market) — they give immediate, README-aligned targets.
-4. Implement **throughput_mixed** (and optionally throughput_adversarial).
-5. Implement **correctness** (replay + checksum).
-6. Implement **memory_hot_path** (tracking allocator or doc + manual check).
-7. Add optional **integrity_stress** and **observability_overhead** if desired.
+**Implementation status:** Items in the summary table above are **implemented** in this repository. Further work (sharding, batch APIs, richer adversarial mixes) extends the same targets rather than replacing them.
 
 This keeps the plan aligned with the four non-negotiable classes (correctness, latency, throughput, memory) plus market integrity and observability as in the README.
