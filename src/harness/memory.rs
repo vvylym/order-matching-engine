@@ -15,6 +15,7 @@ type PriceLevel = BTreeMap<Price, VecDeque<(OrderId, Sequence)>>;
 pub struct InMemoryPriceBook {
     bids: PriceLevel,
     asks: PriceLevel,
+    order_index: HashMap<OrderId, (Side, Price)>,
 }
 
 impl InMemoryPriceBook {
@@ -25,6 +26,7 @@ impl InMemoryPriceBook {
         time_priority: Sequence,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
+        order_index: &mut HashMap<OrderId, (Side, Price)>,
     ) {
         match side {
             Side::Buy => bids
@@ -36,12 +38,14 @@ impl InMemoryPriceBook {
                 .or_default()
                 .push_back((order_id, time_priority)),
         }
+        order_index.insert(order_id, (side, price));
     }
 
     fn pop_best_side(
         side: Side,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
+        order_index: &mut HashMap<OrderId, (Side, Price)>,
     ) -> Option<OrderId> {
         let (best_price, q) = match side {
             Side::Buy => {
@@ -71,26 +75,52 @@ impl InMemoryPriceBook {
                 }
             }
         }
+        order_index.remove(&order_id);
         Some(order_id)
+    }
+
+    fn remove_from_level(
+        order_id: &OrderId,
+        side: Side,
+        price: Price,
+        bids: &mut PriceLevel,
+        asks: &mut PriceLevel,
+    ) -> bool {
+        let levels = match side {
+            Side::Buy => bids,
+            Side::Sell => asks,
+        };
+        let should_remove_level = if let Some(q) = levels.get_mut(&price) {
+            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
+                q.remove(pos).unwrap();
+                q.is_empty()
+            } else {
+                return false;
+            }
+        } else {
+            return false;
+        };
+        if should_remove_level {
+            levels.remove(&price);
+        }
+        true
     }
 
     fn remove_from_side(
         order_id: &OrderId,
         bids: &mut PriceLevel,
         asks: &mut PriceLevel,
+        order_index: &mut HashMap<OrderId, (Side, Price)>,
     ) -> bool {
-        for q in bids.values_mut() {
-            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
-                q.remove(pos).unwrap();
-                return true;
-            }
+        let Some((side, price)) = order_index.remove(order_id) else {
+            return false;
+        };
+        if Self::remove_from_level(order_id, side, price, bids, asks) {
+            return true;
         }
-        for q in asks.values_mut() {
-            if let Some(pos) = q.iter().position(|(id, _)| id == order_id) {
-                q.remove(pos).unwrap();
-                return true;
-            }
-        }
+
+        // Keep behavior stable if index and queues drift apart unexpectedly.
+        order_index.insert(*order_id, (side, price));
         false
     }
 }
@@ -118,15 +148,26 @@ impl PriceBook for InMemoryPriceBook {
             time_priority,
             &mut self.bids,
             &mut self.asks,
+            &mut self.order_index,
         );
     }
 
     fn pop_best(&mut self, side: Side) -> Option<OrderId> {
-        Self::pop_best_side(side, &mut self.bids, &mut self.asks)
+        Self::pop_best_side(
+            side,
+            &mut self.bids,
+            &mut self.asks,
+            &mut self.order_index,
+        )
     }
 
     fn remove(&mut self, order_id: &OrderId) -> bool {
-        Self::remove_from_side(order_id, &mut self.bids, &mut self.asks)
+        Self::remove_from_side(
+            order_id,
+            &mut self.bids,
+            &mut self.asks,
+            &mut self.order_index,
+        )
     }
 }
 
