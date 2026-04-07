@@ -112,6 +112,7 @@ Disable harness: `omer = { version = "…", default-features = false }`.
 | `parallel_best_quotes` | `cargo bench -p omer --features parallel --bench parallel_best_quotes` | 256 `BTreeOrderBook` instances: sequential best-quote scan vs `par_best_quotes` |
 | `throughput_sharded_add` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_add` | Sharded add-only workload: one engine per shard, adds executed in parallel (`rayon`) |
 | `throughput_sharded_book_push` | `cargo bench -p omer --features parallel --bench throughput_sharded_book_push` | Sharded book-only `DashSkipOrderBook::push` in parallel; same-price FIFO vs distinct prices |
+| `throughput_sharded_mixed` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_mixed` | Sharded mixed flow with explicit `OrderId -> shard` index for cancel routing |
 | `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on 50k AddOrder packets in one buffer |
 | `micro` | `cargo bench -p omer --bench micro` | Near-no-op Criterion smoke (picosecond-scale; not engine work) |
 | `matching_engine`, `market_manager` | same pattern | ITCH-shaped smoke benches |
@@ -144,6 +145,7 @@ One **release** run on **Linux 6.5**, **rustc 1.94.1**, **Intel i7-13650HX (20 C
 | `parallel_best_quotes` / sequential vs `rayon` | **~710 ns vs ~19.9 µs** | 256 tiny books: parallel fork/join dominates; scale up book count or work per book to see win |
 | `throughput_sharded_add` / 20 shards add-only | **~19.1 Melem/s** | Aggregate across shards; still far from 1B ops/s without further batching/layout work |
 | `throughput_sharded_book_push` / 20 shards same-price FIFO | **~57.8 Melem/s** | Upper bound (book-only). Distinct prices median was **~23.8 Melem/s** |
+| `throughput_sharded_mixed` / 20 shards + `OrderId -> shard` index | **~2.09 Melem/s** | More realistic mixed path; routing lookups + mixed command costs are visible |
 
 `micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
 
