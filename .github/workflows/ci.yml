@@ -1,4 +1,6 @@
 # PR CI: correctness + compile benches (`--no-run`). No gateway daemons, soak, or heavy bench execution.
+# Note: `pmat` and similar heavyweight quality tools are intentionally not installed here (slow cold starts);
+# run them locally via `make quality-gate` when needed.
 name: CI
 
 on:

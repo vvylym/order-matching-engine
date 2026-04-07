@@ -134,7 +134,7 @@ Coverage (optional): [`scripts/coverage.sh`](scripts/coverage.sh) (CI enforces l
 
 ## Contributing and quality gates
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md): **issue → branch → incremental commits → PR → review**. Use `make ci` to mirror CI and `make quality-gate` for the default [`pmat`](https://crates.io/crates/pmat) profile.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md): **issue → branch → incremental commits → PR → review**. Use `make ci` to mirror CI and `make quality-gate` for optional [`pmat`](https://crates.io/crates/pmat) checks (local-only; see `Makefile`).
 
 ---
 

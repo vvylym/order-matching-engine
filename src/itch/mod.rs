@@ -7,14 +7,15 @@
 
 mod buf;
 mod messages;
-mod stream;
-mod wire;
 
-pub use stream::{
+pub use messages::stream::{
     decode_book_message, process_itch_bytes, process_itch_stream,
     scan_decode_book_messages,
 };
-pub use wire::{BuySell, Oid, StockLocate, Timestamp, WirePrice, WireQty};
+pub use messages::wire;
+pub use messages::wire::{
+    BuySell, Oid, StockLocate, Timestamp, WirePrice, WireQty,
+};
 
 // Re-export for tests or advanced use
 pub use buf::BufferedReader;

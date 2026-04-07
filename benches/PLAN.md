@@ -7,7 +7,7 @@ Design notes for **Criterion** targets under `benches/`. Sections marked with le
 **10⁹+ ops/s** is a **CPU/program target** for the **order book + matcher** when scaled with **sharding, batching, many cores, and micro-optimizations** (see README phases 1–4). It is **not** the same as a single-thread bench on a laptop; it **excludes** network I/O by definition for this number.
 
 1. **Book hot path** — [`throughput_book`](throughput_book.rs) on [`DashSkipOrderBook`](../src/book/service/dash_skip.rs); later `OrderPool`, batch APIs, `rayon`, sharded book, SIMD (README roadmap).
-2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/stream.rs).
+2. **Decode path** — [`itch_parse`](itch_parse.rs) / [`scan_decode_book_messages`](../src/itch/messages.rs).
 3. **Full engine** — `latency_*`, [`throughput_engine`](throughput_engine.rs), future `throughput_mixed` on [`OrderMatchingEngine`](../src/engine/service.rs).
 4. **Gateway / wire** — separate measurement when that binary exists; do not conflate with matcher-only figures.
 

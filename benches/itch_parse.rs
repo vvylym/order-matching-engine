@@ -8,7 +8,7 @@ use std::hint::black_box;
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
 use omer::itch::scan_decode_book_messages;
 
-/// One AddOrder ITCH packet (36-byte payload), same layout as unit tests in `stream.rs`.
+/// One AddOrder ITCH packet (36-byte payload), same layout as unit tests in `messages::stream`.
 fn one_add_order_packet() -> Vec<u8> {
     let mut buf = vec![0u8; 3 + 36];
     buf[0..2].copy_from_slice(&36u16.to_be_bytes());

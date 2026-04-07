@@ -5,7 +5,7 @@
 1. **Issue** — describe the behavior, constraints, and acceptance checks.
 2. **Branch** — `feat/…`, `fix/…`, `docs/…`, aligned with the issue.
 3. **Incremental commits** — small, reviewable steps; [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `docs:`, `test:`, `chore:`).
-4. **Quality gates** — locally match CI: `make ci`, and `make quality-gate` if `pmat` is installed (see `Makefile` for the default check set; extend with `--include-provability` or `--checks dead-code,entropy` when tightening ITCH/harness coverage).
+4. **Quality gates** — locally match CI: `make ci`. Optionally run `make quality-gate` if `pmat` is installed (runs complexity, SATD, security, duplicates, sections, and coverage as separate invocations; not run in GitHub Actions to keep CI fast). Run `pmat quality-gate --checks entropy` manually if you want that heuristic; it may still report `messages.rs` for ITCH parse boilerplate.
 5. **Pull request** — link the issue, summarize behavior change, note benches or perf impact.
 6. **Review & verification** — CI green, coverage budget respected; maintainer merge after sign-off.
 
