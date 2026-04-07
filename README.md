@@ -53,6 +53,29 @@ engine.process(cmd).expect("accepted");
 
 See [`tests/`](tests/) and [`src/engine/models.rs`](src/engine/models.rs) for the full command set.
 
+### Generic builder composition
+
+You can compose the engine from concrete component types with `omer::engine::builder()`:
+
+```rust
+use omer::book::service::BTreeOrderBook;
+use omer::engine::{builder, OrderMatchingService};
+use omer::events::NoOpEventSink;
+use omer::matching::PriceCrossMatchingPolicy;
+use omer::self_trade::AllowAllSelfTradePolicy;
+use omer::sequence::CounterSequenceGenerator;
+use omer::store::service::HashMapOrderStore;
+
+let mut engine = builder()
+    .with_sequence_generator(CounterSequenceGenerator::new())
+    .with_price_book(BTreeOrderBook::new())
+    .with_order_store(HashMapOrderStore::new())
+    .with_matching_policy(PriceCrossMatchingPolicy)
+    .with_self_trade_policy(AllowAllSelfTradePolicy)
+    .with_event_sink(NoOpEventSink)
+    .build();
+```
+
 ---
 
 ## Repository layout
@@ -113,6 +136,7 @@ Disable harness: `omer = { version = "…", default-features = false }`.
 | `throughput_sharded_add` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_add` | Sharded add-only workload: one engine per shard, adds executed in parallel (`rayon`) |
 | `throughput_sharded_book_push` | `cargo bench -p omer --features parallel --bench throughput_sharded_book_push` | Sharded book-only `DashSkipOrderBook::push` in parallel; same-price FIFO vs distinct prices |
 | `throughput_sharded_mixed` | `cargo bench -p omer --features harness,parallel --bench throughput_sharded_mixed` | Sharded mixed flow with explicit `OrderId -> shard` index for cancel routing |
+| `lock_read_heavy` | `cargo bench -p omer --bench lock_read_heavy` | Read-heavy lock comparison: `Arc<std::sync::RwLock<_>>` vs `Arc<parking_lot::RwLock<_>>` vs `Arc<tokio::sync::RwLock<_>>` |
 | `itch_parse` | `cargo bench -p omer --bench itch_parse` | `scan_decode_book_messages` on 50k AddOrder packets in one buffer |
 | `micro` | `cargo bench -p omer --bench micro` | Near-no-op Criterion smoke (picosecond-scale; not engine work) |
 | `matching_engine`, `market_manager` | same pattern | ITCH-shaped smoke benches |
@@ -145,9 +169,29 @@ One **release** run on **Linux 6.5**, **rustc 1.94.1**, **Intel i7-13650HX (20 C
 | `parallel_best_quotes` / sequential vs `rayon` | **~710 ns vs ~19.9 µs** | 256 tiny books: parallel fork/join dominates; scale up book count or work per book to see win |
 | `throughput_sharded_add` / 20 shards add-only | **~19.1 Melem/s** | Aggregate across shards; still far from 1B ops/s without further batching/layout work |
 | `throughput_sharded_book_push` / 20 shards same-price FIFO | **~57.8 Melem/s** | Upper bound (book-only). Distinct prices median was **~23.8 Melem/s** |
-| `throughput_sharded_mixed` / 20 shards + `OrderId -> shard` index | **~2.09 Melem/s** | More realistic mixed path; routing lookups + mixed command costs are visible |
+| `throughput_sharded_mixed` / 20 shards + `OrderId -> shard` index | **~2.39 Melem/s** | More realistic mixed path; routing lookups + mixed command costs are visible |
+| `lock_read_heavy` / std vs parking_lot vs tokio RwLock | **~54.5 / ~52.7 / ~25.9 Melem/s** | This synthetic read-heavy test favors sync locks; async lock costs more per op |
 
 `micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
+
+---
+
+## Tokio harness binaries
+
+This repo now includes a lightweight benchmark harness server and client:
+
+- `cargo run --bin server -- --bind 127.0.0.1:7001 --shards 8`
+- `cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --symbols 32 --duration-secs 8`
+
+Protocol is intentionally simple for measurement (not production API):
+
+- `ADD <id> <participant> <symbol> <B|S> <price> <qty>`
+- `MARKET <id> <participant> <symbol> <B|S> <qty>`
+- `CANCELID <order_id>`
+
+Reference run on the same machine:
+
+- `connections=4 duration_s=8 ok_ops=761874 err_ops=0 throughput_ops_s=95234.25 avg_latency_ns=41537.87`
 
 ---
 
@@ -158,6 +202,17 @@ Release build, pinned CPU, frame pointers:
 ```bash
 export RUSTFLAGS="-C force-frame-pointers=yes"
 cargo flamegraph -p omer --bench throughput_engine --features harness -- --bench
+```
+
+For the sharded mixed path, a sample flamegraph artifact is included at:
+
+- [`docs/perf/flamegraph-throughput_sharded_mixed.svg`](docs/perf/flamegraph-throughput_sharded_mixed.svg)
+
+Command used:
+
+```bash
+export RUSTFLAGS="-C force-frame-pointers=yes"
+cargo flamegraph -p omer --bench throughput_sharded_mixed --features harness,parallel --output docs/perf/flamegraph-throughput_sharded_mixed.svg -- --bench --noplot --sample-size 10 --warm-up-time 0.1 --measurement-time 0.2
 ```
 
 Alternatives: `perf record` + flame graph tooling (see earlier commits or team runbooks). Attach machine type, `rustc -V`, and git SHA with any numbers.
