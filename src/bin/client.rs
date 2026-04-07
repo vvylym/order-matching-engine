@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use omer::distributed_wire::{WireCommand, WireFrame, encode_frame};
+use omer::distributed_wire::{
+    WireCommand, WireCommandBuffer, WireFrame, encode_frame,
+};
 use omer::types::Side;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -138,7 +140,8 @@ fn workload_frame(
     batch_size: usize,
     cancel_id: &mut Option<u64>,
 ) -> WireFrame {
-    let mut commands = Vec::with_capacity(batch_size);
+    let mut commands = WireCommandBuffer::new();
+    commands.reserve(batch_size);
     for offset in 0..batch_size {
         let current = order_id.wrapping_add(offset as u64);
         let seq = i.wrapping_add(offset as u64);

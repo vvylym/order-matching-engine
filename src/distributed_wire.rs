@@ -5,6 +5,8 @@
 
 use std::fmt;
 
+use smallvec::{SmallVec, smallvec};
+
 use crate::engine::{AddOrderCommand, CancelByOrderIdCommand};
 use crate::types::{OrderType, Side, TimeInForce};
 
@@ -51,11 +53,22 @@ pub enum WireCommand {
     },
 }
 
+/// Inline capacity for typical harness batches (default client `--batch-size` is 4).
+pub type WireCommandBuffer = SmallVec<[WireCommand; 4]>;
+
+type EncodedPartBuffer = SmallVec<[String; 4]>;
+
+type WhitespaceTokens<'a> = SmallVec<[&'a str; 8]>;
+
+type BatchRawParts<'a> = SmallVec<[&'a str; 16]>;
+
 /// Parsed frame: either a single command or a command batch.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WireFrame {
     /// Commands in this frame. Never empty.
-    pub commands: Vec<WireCommand>,
+    ///
+    /// Uses [`SmallVec`] so small frames avoid heap allocations for the command list.
+    pub commands: WireCommandBuffer,
 }
 
 /// Parse/validation errors returned by wire decoding.
@@ -123,7 +136,7 @@ pub fn parse_frame(line: &str) -> Result<WireFrame, WireParseError> {
     }
 
     Ok(WireFrame {
-        commands: vec![parse_single(line)?],
+        commands: smallvec![parse_single(line)?],
     })
 }
 
@@ -136,7 +149,7 @@ pub fn encode_frame(frame: &WireFrame) -> Result<String, WireParseError> {
         return Err(WireParseError::BatchTooLarge);
     }
 
-    let mut encoded: Vec<String> =
+    let mut encoded: EncodedPartBuffer =
         frame.commands.iter().map(encode_single).collect();
     if encoded.len() == 1 {
         let mut line = encoded.pop().expect("single command exists");
@@ -212,7 +225,7 @@ impl WireCommand {
 }
 
 fn parse_single(line: &str) -> Result<WireCommand, WireParseError> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
+    let parts: WhitespaceTokens<'_> = line.split_whitespace().collect();
     if parts.is_empty() {
         return Err(WireParseError::Empty);
     }
@@ -226,14 +239,14 @@ fn parse_single(line: &str) -> Result<WireCommand, WireParseError> {
 }
 
 fn parse_batch_frame(rest: &str) -> Result<WireFrame, WireParseError> {
-    let raw_cmds: Vec<&str> = rest.split('|').collect();
+    let raw_cmds: BatchRawParts<'_> = rest.split('|').collect();
     if raw_cmds.is_empty() || raw_cmds.iter().any(|cmd| cmd.trim().is_empty()) {
         return Err(WireParseError::InvalidBatch);
     }
     if raw_cmds.len() > MAX_BATCH_COMMANDS {
         return Err(WireParseError::BatchTooLarge);
     }
-    let mut commands = Vec::with_capacity(raw_cmds.len());
+    let mut commands = WireCommandBuffer::with_capacity(raw_cmds.len());
     for raw in raw_cmds {
         commands.push(parse_single(raw.trim())?);
     }
@@ -360,6 +373,7 @@ mod tests {
         WireCommand, WireFrame, WireParseError, encode_frame, parse_frame,
     };
     use crate::types::Side;
+    use smallvec::smallvec;
 
     #[test]
     fn parse_single_add_roundtrip() {
@@ -367,7 +381,7 @@ mod tests {
         assert_eq!(
             frame,
             WireFrame {
-                commands: vec![WireCommand::Add {
+                commands: smallvec![WireCommand::Add {
                     id: 10,
                     participant_id: 20,
                     instrument_id: 2,

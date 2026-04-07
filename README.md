@@ -411,6 +411,31 @@ Tradeoffs:
 - Extra invariant (`u32` level capacity) is acceptable for the benchmark harness but would need a different strategy for a production book that must support extreme depth per level.
 - `total_depth` now walks levels with explicit loops so `FnMut` resolution stays correct under clippy; slightly more code for the same semantics.
 
+#### Priority 9 result: `SmallVec` on distributed wire path (`p4`)
+
+What we tried:
+
+- Added a direct `smallvec` dependency and switched `WireFrame` command storage to `SmallVec<[WireCommand; 4]>` (alias `WireCommandBuffer`) so default-size harness batches avoid heap allocating the command list.
+- Used `SmallVec` for encode scratch strings, whitespace token splits, and `BATCH` segment splits before parsing.
+- Updated the Tokio client to build frames with `WireCommandBuffer`.
+
+What worked:
+
+- Protocol encoding/decoding semantics stay the same; larger batches still spill to the heap transparently.
+- `make ci` and `make quality-gate` passed locally before PR.
+
+Measured subset (`throughput_sharded_mixed` / `inmemory`, sample-size 10, short window on this machine):
+
+- Throughput interval about **6.06M to 9.15M elements/s** (Criterion printed `[6.0586, 7.4448, 9.1479] Melem/s`).
+
+What did not work:
+
+- Do not treat this as a guaranteed throughput win until repeated runs show a stable delta versus the prior commit.
+
+Tradeoffs:
+
+- One more direct dependency and slightly more type surface (`WireCommandBuffer`) for a targeted allocation reduction on small frames.
+
 ---
 
 ## Tokio harness binaries
