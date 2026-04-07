@@ -1,22 +1,19 @@
 //! Tokio benchmark harness server.
 //!
-//! Accepts a simple line protocol and routes commands to shard-local engines.
+//! Accepts a typed line protocol and routes commands to instrument-local engines.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use clap::Parser;
 use omer::book::service::BTreeOrderBook;
-use omer::engine::{
-    AddOrderCommand, CancelByOrderIdCommand, OrderCommand, OrderMatchingService,
-    builder,
-};
+use omer::distributed_wire::{RoutedCommand, WireParseError, parse_frame};
+use omer::engine::{OrderCommand, OrderMatchingService, builder};
 use omer::events::NoOpEventSink;
 use omer::matching::PriceCrossMatchingPolicy;
 use omer::self_trade::AllowAllSelfTradePolicy;
 use omer::sequence::CounterSequenceGenerator;
 use omer::store::service::HashMapOrderStore;
-use omer::types::{OrderType, Side, TimeInForce};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{RwLock, mpsc};
@@ -25,59 +22,38 @@ use tokio::sync::{RwLock, mpsc};
 struct Args {
     #[arg(long, default_value = "127.0.0.1:7001")]
     bind: String,
-    #[arg(long, default_value_t = 8)]
-    shards: usize,
+    #[arg(long, default_value_t = 4)]
+    instruments: usize,
 }
 
 #[derive(Debug)]
 enum WorkerCmd {
-    Add(AddOrderCommand),
-    CancelById(CancelByOrderIdCommand),
+    Add {
+        instrument_id: u32,
+        add: omer::engine::AddOrderCommand,
+    },
+    CancelById {
+        instrument_id: u32,
+        cancel: omer::engine::CancelByOrderIdCommand,
+    },
 }
 
 type RouterIndex = Arc<RwLock<HashMap<u64, usize>>>;
 type WorkerSender = mpsc::UnboundedSender<WorkerCmd>;
 type DynErr = Box<dyn std::error::Error>;
-type ParseErr = &'static str;
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), DynErr> {
     let args = Args::parse();
     let listener = TcpListener::bind(&args.bind).await?;
-    let shards = args.shards.max(1);
-
-    let mut senders = Vec::with_capacity(shards);
-    for shard_id in 0..shards {
-        let (tx, mut rx) = mpsc::unbounded_channel::<WorkerCmd>();
-        senders.push(tx);
-        tokio::spawn(async move {
-            let mut engine = builder()
-                .with_sequence_generator(CounterSequenceGenerator::new())
-                .with_price_book(BTreeOrderBook::new())
-                .with_order_store(HashMapOrderStore::new())
-                .with_matching_policy(PriceCrossMatchingPolicy)
-                .with_self_trade_policy(AllowAllSelfTradePolicy)
-                .with_event_sink(NoOpEventSink)
-                .build();
-
-            while let Some(cmd) = rx.recv().await {
-                match cmd {
-                    WorkerCmd::Add(add) => {
-                        let _ = engine.process(OrderCommand::Add(add));
-                    }
-                    WorkerCmd::CancelById(cancel) => {
-                        let _ =
-                            engine.process(OrderCommand::CancelByOrderId(cancel));
-                    }
-                }
-            }
-
-            eprintln!("worker {shard_id} exited");
-        });
-    }
+    let instruments = args.instruments.max(1);
+    let senders = build_worker_senders(instruments);
 
     let router_index: RouterIndex = Arc::new(RwLock::new(HashMap::new()));
-    println!("server listening on {}", args.bind);
+    println!(
+        "server listening on {} with instruments={}",
+        args.bind, instruments
+    );
 
     loop {
         let (stream, _) = listener.accept().await?;
@@ -96,14 +72,14 @@ async fn handle_client(
     senders: Vec<WorkerSender>,
     index: RouterIndex,
 ) -> Result<(), DynErr> {
-    let shards = senders.len();
+    let instruments = senders.len();
     let (read_half, mut write_half) = stream.into_split();
     let mut lines = BufReader::new(read_half).lines();
 
     while let Some(line) = lines.next_line().await? {
         write_response(
             &mut write_half,
-            route_and_dispatch(&line, shards, &senders, &index).await,
+            route_and_dispatch(&line, instruments, &senders, &index).await,
         )
         .await?;
     }
@@ -112,7 +88,7 @@ async fn handle_client(
 
 async fn write_response(
     writer: &mut tokio::net::tcp::OwnedWriteHalf,
-    result: Result<RouteResult, ParseErr>,
+    result: Result<RouteResult, WireParseError>,
 ) -> Result<(), DynErr> {
     match result {
         Ok(RouteResult::Ok) => writer.write_all(b"OK\n").await?,
@@ -131,113 +107,120 @@ enum RouteResult {
 
 async fn route_and_dispatch(
     line: &str,
-    shards: usize,
+    instruments: usize,
     senders: &[WorkerSender],
     index: &RouterIndex,
-) -> Result<RouteResult, ParseErr> {
-    match parse_command(line)? {
-        WireCmd::Add(add) => {
-            let shard = (add.symbol_id as usize) % shards;
-            index.write().await.insert(add.id, shard);
-            let _ = senders[shard].send(WorkerCmd::Add(add));
-            Ok(RouteResult::Ok)
+) -> Result<RouteResult, WireParseError> {
+    let frame = parse_frame(line)?;
+    for cmd in frame.commands {
+        let route =
+            dispatch_command(cmd.into_routed(), instruments, senders, index)
+                .await?;
+        if matches!(route, RouteResult::UnknownOrder) {
+            return Ok(RouteResult::UnknownOrder);
         }
-        WireCmd::Market(mut add) => {
-            let shard = (add.symbol_id as usize) % shards;
-            add.order_type = OrderType::Market;
-            add.price = None;
-            add.time_in_force = TimeInForce::Ioc;
-            let _ = senders[shard].send(WorkerCmd::Add(add));
-            Ok(RouteResult::Ok)
-        }
-        WireCmd::CancelById(order_id) => {
-            let route = index.write().await.remove(&order_id);
-            if let Some(shard) = route {
-                let _ = senders[shard].send(WorkerCmd::CancelById(
-                    CancelByOrderIdCommand { order_id },
-                ));
-                Ok(RouteResult::Ok)
-            } else {
-                Ok(RouteResult::UnknownOrder)
+    }
+    Ok(RouteResult::Ok)
+}
+
+fn build_worker_senders(instruments: usize) -> Vec<WorkerSender> {
+    let mut senders = Vec::with_capacity(instruments);
+    for worker_idx in 0..instruments {
+        let worker_instrument = (worker_idx + 1) as u32;
+        let (tx, mut rx) = mpsc::unbounded_channel::<WorkerCmd>();
+        senders.push(tx);
+        tokio::spawn(async move {
+            let mut engine = builder()
+                .with_sequence_generator(CounterSequenceGenerator::new())
+                .with_price_book(BTreeOrderBook::new())
+                .with_order_store(HashMapOrderStore::new())
+                .with_matching_policy(PriceCrossMatchingPolicy)
+                .with_self_trade_policy(AllowAllSelfTradePolicy)
+                .with_event_sink(NoOpEventSink)
+                .build();
+
+            while let Some(cmd) = rx.recv().await {
+                apply_worker_command(worker_instrument, &mut engine, cmd);
             }
+            eprintln!("worker {worker_instrument} exited");
+        });
+    }
+    senders
+}
+
+fn apply_worker_command(
+    worker_instrument: u32,
+    engine: &mut impl OrderMatchingService,
+    cmd: WorkerCmd,
+) {
+    match cmd {
+        WorkerCmd::Add { instrument_id, add }
+            if add.symbol_id == worker_instrument
+                && instrument_id == worker_instrument =>
+        {
+            let _ = engine.process(OrderCommand::Add(add));
+        }
+        WorkerCmd::CancelById {
+            instrument_id,
+            cancel,
+        } if instrument_id == worker_instrument => {
+            let _ = engine.process(OrderCommand::CancelByOrderId(cancel));
+        }
+        _ => {}
+    }
+}
+
+async fn dispatch_command(
+    cmd: RoutedCommand,
+    instruments: usize,
+    senders: &[WorkerSender],
+    index: &RouterIndex,
+) -> Result<RouteResult, WireParseError> {
+    match cmd {
+        RoutedCommand::Add { instrument_id, add } => {
+            let worker = route_worker(instrument_id, instruments)?;
+            index.write().await.insert(add.id, worker);
+            let _ = senders[worker].send(WorkerCmd::Add { instrument_id, add });
+            Ok(RouteResult::Ok)
+        }
+        RoutedCommand::CancelById {
+            instrument_id,
+            cancel,
+        } => {
+            dispatch_cancel(instrument_id, cancel, instruments, senders, index)
+                .await
         }
     }
 }
 
-enum WireCmd {
-    Add(AddOrderCommand),
-    Market(AddOrderCommand),
-    CancelById(u64),
-}
-
-fn parse_command(line: &str) -> Result<WireCmd, ParseErr> {
-    let parts: Vec<&str> = line.split_whitespace().collect();
-    if parts.is_empty() {
-        return Err("empty");
+async fn dispatch_cancel(
+    instrument_id: u32,
+    cancel: omer::engine::CancelByOrderIdCommand,
+    instruments: usize,
+    senders: &[WorkerSender],
+    index: &RouterIndex,
+) -> Result<RouteResult, WireParseError> {
+    let expected_worker = route_worker(instrument_id, instruments)?;
+    let route = index.write().await.remove(&cancel.order_id);
+    let Some(worker) = route else {
+        return Ok(RouteResult::UnknownOrder);
+    };
+    if worker != expected_worker {
+        return Ok(RouteResult::UnknownOrder);
     }
+    let _ = senders[worker].send(WorkerCmd::CancelById {
+        instrument_id,
+        cancel,
+    });
+    Ok(RouteResult::Ok)
+}
 
-    match parts[0] {
-        "ADD" if parts.len() == 7 => parse_add(parts.as_slice()),
-        "MARKET" if parts.len() == 6 => parse_market(parts.as_slice()),
-        "CANCELID" if parts.len() == 2 => {
-            let order_id = parts[1].parse().map_err(|_| "order_id")?;
-            Ok(WireCmd::CancelById(order_id))
-        }
-        _ => Err("unknown"),
+fn route_worker(
+    instrument_id: u32,
+    instruments: usize,
+) -> Result<usize, WireParseError> {
+    if instrument_id == 0 || (instrument_id as usize) > instruments {
+        return Err(WireParseError::InvalidInstrument);
     }
-}
-
-fn parse_side(s: &str) -> Result<Side, ParseErr> {
-    match s {
-        "B" | "BUY" => Ok(Side::Buy),
-        "S" | "SELL" => Ok(Side::Sell),
-        _ => Err("side"),
-    }
-}
-
-fn parse_add(parts: &[&str]) -> Result<WireCmd, ParseErr> {
-    let id = parts[1].parse().map_err(|_| "id")?;
-    let participant_id = parts[2].parse().map_err(|_| "pid")?;
-    let symbol_id = parts[3].parse().map_err(|_| "symbol")?;
-    let side = parse_side(parts[4])?;
-    let price = parts[5].parse().map_err(|_| "price")?;
-    let quantity = parts[6].parse().map_err(|_| "qty")?;
-    Ok(WireCmd::Add(AddOrderCommand {
-        id,
-        participant_id,
-        symbol_id,
-        side,
-        order_type: OrderType::Limit,
-        price: Some(price),
-        quantity,
-        time_in_force: TimeInForce::Gtc,
-        stop_price: None,
-        max_visible_quantity: None,
-        slippage: None,
-        trailing_distance: None,
-        trailing_step: None,
-    }))
-}
-
-fn parse_market(parts: &[&str]) -> Result<WireCmd, ParseErr> {
-    let id = parts[1].parse().map_err(|_| "id")?;
-    let participant_id = parts[2].parse().map_err(|_| "pid")?;
-    let symbol_id = parts[3].parse().map_err(|_| "symbol")?;
-    let side = parse_side(parts[4])?;
-    let quantity = parts[5].parse().map_err(|_| "qty")?;
-    Ok(WireCmd::Market(AddOrderCommand {
-        id,
-        participant_id,
-        symbol_id,
-        side,
-        order_type: OrderType::Market,
-        price: None,
-        quantity,
-        time_in_force: TimeInForce::Ioc,
-        stop_price: None,
-        max_visible_quantity: None,
-        slippage: None,
-        trailing_distance: None,
-        trailing_step: None,
-    }))
+    Ok((instrument_id - 1) as usize)
 }
