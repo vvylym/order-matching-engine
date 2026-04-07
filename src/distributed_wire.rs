@@ -367,6 +367,12 @@ fn parse_i64(token: &str) -> Result<i64, WireParseError> {
         .map_err(|_| WireParseError::InvalidNumber)
 }
 
+#[cfg(feature = "rkyv")]
+mod rkyv_wire;
+
+#[cfg(feature = "rkyv")]
+pub use rkyv_wire::{RkyvWireError, decode_frame_rkyv, encode_frame_rkyv};
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -1,5 +1,15 @@
 # Contributing
 
+## Quick start (local development)
+
+```bash
+cargo test --workspace --all-features --all-targets
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo fmt --all
+```
+
+CI enforces a line-coverage threshold via [`scripts/coverage.sh`](scripts/coverage.sh) (`cargo-llvm-cov`). Run it locally after meaningful changes to the measured crate surface.
+
 ## Engineering process
 
 1. **Issue** — describe the behavior, constraints, and acceptance checks.
