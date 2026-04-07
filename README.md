@@ -385,6 +385,32 @@ Tradeoffs:
 - The indexed queue carries extra bookkeeping (index updates on swaps/removals) and higher implementation complexity.
 - Keep this as a measured candidate rather than a guaranteed throughput improvement across environments.
 
+#### Priority 8 result: cache-density pass on harness level queues (`p3`)
+
+What we tried:
+
+- Stored per-level slot indices as `u32` instead of `usize` in the `order_id -> slot` map to shrink value size on 64-bit targets.
+- Reordered resting-queue tuples to `(Sequence, OrderId)` so `pop_min_sequence` scans compare the time-priority key before the order id.
+- Documented harness invariant: at most `u32::MAX` resting orders per single price level (above that the harness panics with a clear message).
+
+What worked:
+
+- Keeps `PriceBook` behavior identical while narrowing hot map values and improving scan locality for sequence selection.
+- `make ci`, `make quality-gate`, and the fixed `throughput_sharded_mixed` subset all passed on this machine.
+
+Measured subset (same command as other rollout steps: `throughput_sharded_mixed` / `inmemory`, sample-size 10, short window):
+
+- Throughput interval about **5.40M to 7.49M elements/s** in this run (Criterion printed `[5.4018, 6.3373, 7.4948] Melem/s`).
+
+What did not work:
+
+- This short window is noisy versus the prior `p2` run on the same command; treat the interval as a single observation, not a proven regression or win versus `p3` baseline without more repeats.
+
+Tradeoffs:
+
+- Extra invariant (`u32` level capacity) is acceptable for the benchmark harness but would need a different strategy for a production book that must support extreme depth per level.
+- `total_depth` now walks levels with explicit loops so `FnMut` resolution stays correct under clippy; slightly more code for the same semantics.
+
 ---
 
 ## Tokio harness binaries
