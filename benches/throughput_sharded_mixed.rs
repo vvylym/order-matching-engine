@@ -31,6 +31,7 @@ struct ShardedRouter<PB: PriceBook + Default + Send> {
     engines: Vec<ShardEngine<PB>>,
     order_to_shard: HashMap<u64, usize>,
     alive_ids: AliveQueues,
+    batches: RoutedBatches,
     next_order_id: u64,
 }
 
@@ -39,7 +40,12 @@ impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
         Self {
             engines: (0..shards).map(|_| engine_with_book_noop::<PB>()).collect(),
             order_to_shard: HashMap::with_capacity(shards * 8_192),
-            alive_ids: (0..shards).map(|_| VecDeque::new()).collect(),
+            alive_ids: (0..shards)
+                .map(|_| VecDeque::with_capacity(OPS_PER_SHARD as usize))
+                .collect(),
+            batches: (0..shards)
+                .map(|_| Vec::with_capacity(OPS_PER_SHARD as usize))
+                .collect(),
             next_order_id: 1,
         }
     }
@@ -50,19 +56,12 @@ impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
         id
     }
 
-    fn add_limit(
-        &mut self,
-        shard: usize,
-        side: Side,
-        qty: i64,
-        price: i64,
-        batches: &mut RoutedBatches,
-    ) {
+    fn add_limit(&mut self, shard: usize, side: Side, qty: i64, price: i64) {
         let id = self.alloc_order_id();
         self.order_to_shard.insert(id, shard);
         self.alive_ids[shard].push_back(id);
 
-        batches[shard].push(OrderCommand::Add(AddOrderCommand {
+        self.batches[shard].push(OrderCommand::Add(AddOrderCommand {
             id,
             participant_id: 100 + shard as u64,
             symbol_id: shard as u32 + 1,
@@ -79,15 +78,9 @@ impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
         }));
     }
 
-    fn add_market(
-        &mut self,
-        shard: usize,
-        side: Side,
-        qty: i64,
-        batches: &mut RoutedBatches,
-    ) {
+    fn add_market(&mut self, shard: usize, side: Side, qty: i64) {
         let id = self.alloc_order_id();
-        batches[shard].push(OrderCommand::Add(AddOrderCommand {
+        self.batches[shard].push(OrderCommand::Add(AddOrderCommand {
             id,
             participant_id: 200 + shard as u64,
             symbol_id: shard as u32 + 1,
@@ -104,10 +97,10 @@ impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
         }));
     }
 
-    fn cancel_oldest(&mut self, shard: usize, batches: &mut RoutedBatches) {
+    fn cancel_oldest(&mut self, shard: usize) {
         if let Some(order_id) = self.alive_ids[shard].pop_front() {
             self.order_to_shard.remove(&order_id);
-            batches[shard].push(OrderCommand::CancelByOrderId(
+            self.batches[shard].push(OrderCommand::CancelByOrderId(
                 CancelByOrderIdCommand { order_id },
             ));
         }
@@ -115,27 +108,29 @@ impl<PB: PriceBook + Default + Send> ShardedRouter<PB> {
 
     fn run_round(&mut self) {
         let shards = self.engines.len();
-        let mut batches: RoutedBatches = vec![Vec::<OrderCommand>::new(); shards];
+        for batch in &mut self.batches {
+            batch.clear();
+        }
 
         for shard in 0..shards {
             for i in 0..OPS_PER_SHARD {
                 match i % 10 {
                     0..=5 => {
                         let p = 100 + ((i as i64 + shard as i64) % 80);
-                        self.add_limit(shard, Side::Buy, 1, p, &mut batches);
+                        self.add_limit(shard, Side::Buy, 1, p);
                     }
-                    6 | 7 => self.cancel_oldest(shard, &mut batches),
-                    8 => self.add_limit(shard, Side::Sell, 5, 250, &mut batches),
-                    _ => self.add_market(shard, Side::Buy, 5, &mut batches),
+                    6 | 7 => self.cancel_oldest(shard),
+                    8 => self.add_limit(shard, Side::Sell, 5, 250),
+                    _ => self.add_market(shard, Side::Buy, 5),
                 }
             }
         }
 
         self.engines
             .par_iter_mut()
-            .zip(batches.into_par_iter())
+            .zip(self.batches.par_iter_mut())
             .for_each(|(engine, cmds)| {
-                for cmd in cmds {
+                for cmd in cmds.drain(..) {
                     let _ = engine.process(cmd);
                 }
                 black_box((engine.best_bid(), engine.best_ask()));

@@ -261,6 +261,31 @@ Tradeoffs:
 
 - Longer benchmark runtime (three benchmark functions instead of one) in exchange for clearer backend parity data.
 
+#### Priority 4 result: reuse command batches and reduce allocation churn
+
+Before/after medians from the same benchmark command:
+
+- `InMemoryPriceBook`: **2,379,900 -> 2,295,600 operations per second**
+- `BTreeOrderBook`: **1,565,500 -> 1,748,700 operations per second**
+- `DashSkipOrderBook`: **1,587,900 -> 1,613,500 operations per second**
+
+What we tried:
+
+- Reused per-shard command vectors across rounds (`clear` + `drain`) instead of creating fresh vectors every round.
+- Pre-sized per-shard alive queues and command buffers with `OPS_PER_SHARD` capacity.
+
+What worked:
+
+- Allocation behavior is now steadier in the benchmark loop (capacity is retained across rounds).
+
+What did not work:
+
+- Throughput differences were mixed and not statistically significant in this short sample run.
+
+Tradeoffs:
+
+- Slightly more complex benchmark code for buffer lifecycle management, with no clear immediate throughput win.
+
 ---
 
 ## Tokio harness binaries
