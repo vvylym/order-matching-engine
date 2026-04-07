@@ -1,3 +1,98 @@
+# omer
+
+`omer` is a Rust order matching engine with a small Tokio harness (`server` + `client`) for repeatable local performance checks.
+
+## Installation
+
+Requirements:
+
+- Rust stable toolchain (`rustup default stable`)
+- Linux/macOS shell
+
+Clone and build:
+
+```bash
+git clone https://github.com/vvylym/order-matching-engine.git
+cd order-matching-engine
+cargo build --workspace --all-features
+```
+
+## Usage
+
+Run core checks locally:
+
+```bash
+make ci
+make quality-gate
+```
+
+Start harness server:
+
+```bash
+cargo run --bin server -- --bind 127.0.0.1:7001 --instruments 4 --worker-channel tokio --price-book btree
+```
+
+Drive mixed load (4 clients):
+
+```bash
+cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 4 --batch-size 4 --duration-secs 8
+```
+
+## Repository layout
+
+- `src/` core engine, books, stores, matching policies, harness utilities
+- `src/bin/server.rs` Tokio benchmark harness server
+- `src/bin/client.rs` Tokio benchmark harness client
+- `benches/` Criterion benchmarks
+- `tests/` integration tests
+- `docs/` design and performance artifacts
+- `scripts/` helper scripts (including coverage gate script)
+
+## Services
+
+Engine service entrypoint:
+
+- `OrderMatchingService` processes `OrderCommand` values (`Add`, `Cancel`, `Replace`, `CancelByOrderId`, `Reduce`, `Execute`, `ReplaceByNewId`).
+
+Harness services:
+
+- `server`: parses wire commands and dispatches to instrument workers
+- `client`: emits mixed workloads and reports ops/latency counters
+
+## Benchmarks
+
+Measurement approach used in this README:
+
+- **Client/server harness mode** (not synthetic microbench only)
+- `4` concurrent clients
+- each run lasts `8` seconds
+- fixed load shape: mixed add/cancel/market with `batch-size=4`
+- server worker channel: `tokio`
+- results below are single-run observations on this machine
+
+Top 3 engine settings (PriceBook, OrderStore, EventSink):
+
+| PriceBook | OrderStore | EventSink | Clients | Ops tested (`ok_ops + err_ops`) | Total time |
+| --- | --- | --- | ---: | ---: | ---: |
+| `DashSkipOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 2,041,836 | 8s |
+| `PoolLevelOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 2,019,472 | 8s |
+| `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 1,957,996 | 8s |
+
+## Contributing
+
+Use the incremental workflow:
+
+1. open an issue
+2. create a branch
+3. keep one focused change per PR
+4. run `make ci` and `make quality-gate`
+5. include measured notes for performance-impacting changes
+
+See `CONTRIBUTING.md` for the full process.
+
+## Licenses
+
+Project code is released under the [MIT License](LICENSE).
 # omer — order matching engine
 
 [![CI](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/vvylym/order-matching-engine/actions/workflows/ci.yml)

@@ -2,11 +2,13 @@
 //!
 //! Accepts a typed line protocol and routes commands to instrument-local engines.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
-use omer::book::service::BTreeOrderBook;
+use dashmap::DashMap;
+use omer::book::service::{
+    BTreeOrderBook, DashSkipOrderBook, PoolLevelOrderBook,
+};
 use omer::distributed_wire::{RoutedCommand, WireParseError, parse_frame};
 use omer::engine::{OrderCommand, OrderMatchingService, builder};
 use omer::events::NoOpEventSink;
@@ -16,7 +18,7 @@ use omer::sequence::CounterSequenceGenerator;
 use omer::store::service::HashMapOrderStore;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::mpsc;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -26,6 +28,8 @@ struct Args {
     instruments: usize,
     #[arg(long, value_enum, default_value_t = ChannelKind::Tokio)]
     worker_channel: ChannelKind,
+    #[arg(long, value_enum, default_value_t = PriceBookKind::Btree)]
+    price_book: PriceBookKind,
 }
 
 /// How routed matcher commands are delivered in this harness.
@@ -40,6 +44,18 @@ enum ChannelKind {
     Crossbeam,
 }
 
+/// Price book backend used by each matcher worker.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, ValueEnum)]
+enum PriceBookKind {
+    #[value(name = "btree")]
+    #[default]
+    Btree,
+    #[value(name = "dash_skip")]
+    DashSkip,
+    #[value(name = "pool_level")]
+    PoolLevel,
+}
+
 #[derive(Debug)]
 enum WorkerCmd {
     Add {
@@ -52,7 +68,7 @@ enum WorkerCmd {
     },
 }
 
-type RouterIndex = Arc<RwLock<HashMap<u64, usize>>>;
+type RouterIndex = Arc<DashMap<u64, usize>>;
 type DynErr = Box<dyn std::error::Error>;
 type TokioWorkerTx = mpsc::UnboundedSender<WorkerCmd>;
 type CrossbeamWorkerTx = crossbeam_channel::Sender<WorkerCmd>;
@@ -89,12 +105,13 @@ async fn main() -> Result<(), DynErr> {
     let args = Args::parse();
     let listener = TcpListener::bind(&args.bind).await?;
     let instruments = args.instruments.max(1);
-    let senders = build_worker_senders(instruments, args.worker_channel);
+    let senders =
+        build_worker_senders(instruments, args.worker_channel, args.price_book);
 
-    let router_index: RouterIndex = Arc::new(RwLock::new(HashMap::new()));
+    let router_index: RouterIndex = Arc::new(DashMap::new());
     println!(
-        "server listening on {} with instruments={} worker_channel={:?}",
-        args.bind, instruments, args.worker_channel
+        "server listening on {} with instruments={} worker_channel={:?} price_book={:?}",
+        args.bind, instruments, args.worker_channel, args.price_book
     );
 
     loop {
@@ -164,27 +181,34 @@ async fn route_and_dispatch(
     Ok(RouteResult::Ok)
 }
 
-fn build_worker_senders(instruments: usize, kind: ChannelKind) -> WorkerSenders {
+fn build_worker_senders(
+    instruments: usize,
+    kind: ChannelKind,
+    price_book: PriceBookKind,
+) -> WorkerSenders {
     match kind {
         ChannelKind::Tokio => {
-            WorkerSenders::Tokio(spawn_tokio_workers(instruments))
+            WorkerSenders::Tokio(spawn_tokio_workers(instruments, price_book))
         }
-        ChannelKind::Crossbeam => {
-            WorkerSenders::Crossbeam(spawn_crossbeam_workers(instruments))
-        }
+        ChannelKind::Crossbeam => WorkerSenders::Crossbeam(
+            spawn_crossbeam_workers(instruments, price_book),
+        ),
     }
 }
 
-fn spawn_tokio_workers(instruments: usize) -> Vec<TokioWorkerTx> {
+fn spawn_tokio_workers(
+    instruments: usize,
+    price_book: PriceBookKind,
+) -> Vec<TokioWorkerTx> {
     let mut senders = Vec::with_capacity(instruments);
     for worker_idx in 0..instruments {
         let worker_instrument = (worker_idx + 1) as u32;
         let (tx, mut rx) = mpsc::unbounded_channel::<WorkerCmd>();
         senders.push(tx);
         tokio::spawn(async move {
-            let mut engine = matcher_engine();
+            let mut engine = matcher_engine(price_book);
             while let Some(cmd) = rx.recv().await {
-                apply_worker_command(worker_instrument, &mut engine, cmd);
+                apply_worker_command(worker_instrument, engine.as_mut(), cmd);
             }
             eprintln!("tokio worker {worker_instrument} exited");
         });
@@ -192,7 +216,10 @@ fn spawn_tokio_workers(instruments: usize) -> Vec<TokioWorkerTx> {
     senders
 }
 
-fn spawn_crossbeam_workers(instruments: usize) -> Vec<CrossbeamWorkerTx> {
+fn spawn_crossbeam_workers(
+    instruments: usize,
+    price_book: PriceBookKind,
+) -> Vec<CrossbeamWorkerTx> {
     let mut senders = Vec::with_capacity(instruments);
     for worker_idx in 0..instruments {
         let worker_instrument = (worker_idx + 1) as u32;
@@ -201,9 +228,9 @@ fn spawn_crossbeam_workers(instruments: usize) -> Vec<CrossbeamWorkerTx> {
         std::thread::Builder::new()
             .name(format!("omer-matcher-{worker_instrument}"))
             .spawn(move || {
-                let mut engine = matcher_engine();
+                let mut engine = matcher_engine(price_book);
                 while let Ok(cmd) = rx.recv() {
-                    apply_worker_command(worker_instrument, &mut engine, cmd);
+                    apply_worker_command(worker_instrument, engine.as_mut(), cmd);
                 }
                 eprintln!("crossbeam worker {worker_instrument} exited");
             })
@@ -212,20 +239,31 @@ fn spawn_crossbeam_workers(instruments: usize) -> Vec<CrossbeamWorkerTx> {
     senders
 }
 
-fn matcher_engine() -> impl OrderMatchingService {
-    builder()
+fn matcher_engine(
+    price_book: PriceBookKind,
+) -> Box<dyn OrderMatchingService + Send> {
+    let base = builder()
         .with_sequence_generator(CounterSequenceGenerator::new())
-        .with_price_book(BTreeOrderBook::new())
         .with_order_store(HashMapOrderStore::new())
         .with_matching_policy(PriceCrossMatchingPolicy)
         .with_self_trade_policy(AllowAllSelfTradePolicy)
-        .with_event_sink(NoOpEventSink)
-        .build()
+        .with_event_sink(NoOpEventSink);
+    match price_book {
+        PriceBookKind::Btree => {
+            Box::new(base.with_price_book(BTreeOrderBook::new()).build())
+        }
+        PriceBookKind::DashSkip => {
+            Box::new(base.with_price_book(DashSkipOrderBook::new()).build())
+        }
+        PriceBookKind::PoolLevel => {
+            Box::new(base.with_price_book(PoolLevelOrderBook::new()).build())
+        }
+    }
 }
 
 fn apply_worker_command(
     worker_instrument: u32,
-    engine: &mut impl OrderMatchingService,
+    engine: &mut dyn OrderMatchingService,
     cmd: WorkerCmd,
 ) {
     match cmd {
@@ -254,7 +292,7 @@ async fn dispatch_command(
     match cmd {
         RoutedCommand::Add { instrument_id, add } => {
             let worker = route_worker(instrument_id, instruments)?;
-            index.write().await.insert(add.id, worker);
+            index.insert(add.id, worker);
             senders.send_cmd(worker, WorkerCmd::Add { instrument_id, add });
             Ok(RouteResult::Ok)
         }
@@ -276,8 +314,7 @@ async fn dispatch_cancel(
     index: &RouterIndex,
 ) -> Result<RouteResult, WireParseError> {
     let expected_worker = route_worker(instrument_id, instruments)?;
-    let route = index.write().await.remove(&cancel.order_id);
-    let Some(worker) = route else {
+    let Some((_, worker)) = index.remove(&cancel.order_id) else {
         return Ok(RouteResult::UnknownOrder);
     };
     if worker != expected_worker {
