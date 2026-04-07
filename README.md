@@ -174,6 +174,45 @@ One **release** run on **Linux 6.5**, **rustc 1.94.1**, **Intel i7-13650HX (20 C
 
 `micro` / `matching_engine` / `market_manager` report **~210 ps** per iter (empty loops)—kept as compile/smoke anchors only.
 
+### Flamegraph priority rollout log (ordered steps)
+
+Baseline commands used before Priority 1 (kept fixed for comparison):
+
+- `cargo bench --features harness,parallel --bench throughput_sharded_mixed -- --sample-size 10 --warm-up-time 1 --measurement-time 3`
+- `cargo bench --bench lock_read_heavy -- --sample-size 10 --warm-up-time 1 --measurement-time 3`
+
+Baseline medians from those commands:
+
+- `throughput_sharded_mixed`: about **470,480 operations per second**
+- `lock_read_heavy`:
+  - `std::sync::RwLock`: about **59,177,000 operations per second**
+  - `parking_lot::RwLock`: about **52,860,000 operations per second**
+  - `tokio::sync::RwLock`: about **24,760,000 operations per second**
+
+#### Priority 1 result: indexed remove in `InMemoryPriceBook`
+
+- Before: about **470,480 operations per second** (`throughput_sharded_mixed`)
+- After: about **2,446,400 operations per second** (`throughput_sharded_mixed`)
+- Relative change: roughly **5.2x higher throughput**
+
+What we tried:
+
+- Added an internal `order_id -> (side, price)` index in the harness in-memory book.
+- Kept public `PriceBook` behavior and trait interface unchanged.
+
+What worked:
+
+- `remove` now looks up the target level directly and scans one queue instead of all book levels.
+- Hot path throughput improved strongly on the sharded mixed workload.
+
+What did not work:
+
+- Nothing functionally regressed in tests, but this does not remove the per-level queue scan yet (`VecDeque::position` is still linear within one price level).
+
+Tradeoffs:
+
+- Slightly more memory and write-time bookkeeping (maintaining the index) in exchange for much faster cancel/remove routing in mixed workloads.
+
 ---
 
 ## Tokio harness binaries
