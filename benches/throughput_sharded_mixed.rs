@@ -100,9 +100,8 @@ impl ShardedRouter {
     }
 
     fn cancel_oldest(&mut self, shard: usize, batches: &mut RoutedBatches) {
-        if let Some(order_id) = self.alive_ids[shard].pop_front()
-            && self.order_to_shard.remove(&order_id).is_some()
-        {
+        if let Some(order_id) = self.alive_ids[shard].pop_front() {
+            self.order_to_shard.remove(&order_id);
             batches[shard].push(OrderCommand::CancelByOrderId(
                 CancelByOrderIdCommand { order_id },
             ));
