@@ -13,15 +13,23 @@ type PriceLevel = BTreeMap<Price, LevelQueue>;
 
 #[derive(Default)]
 struct LevelQueue {
-    entries: Vec<(OrderId, Sequence)>,
-    positions: HashMap<OrderId, usize>,
+    /// Queue entries ordered by time priority at [`Self::push`], `(sequence, order_id)`.
+    ///
+    /// Sequence is stored first so `pop_min_sequence` scans compare the hot key before the id.
+    entries: Vec<(Sequence, OrderId)>,
+    /// Slot indices are `u32` to shrink the hot `HashMap` value footprint on 64-bit targets.
+    ///
+    /// Harness invariant: at most `u32::MAX` resting orders per price level (matches practical limits).
+    positions: HashMap<OrderId, u32>,
 }
 
 impl LevelQueue {
     fn push(&mut self, order_id: OrderId, time_priority: Sequence) {
-        let idx = self.entries.len();
-        self.entries.push((order_id, time_priority));
-        self.positions.insert(order_id, idx);
+        let idx_u32 = u32::try_from(self.entries.len()).expect(
+            "in-memory level queue exceeded u32::MAX entries (harness instrument limit)",
+        );
+        self.entries.push((time_priority, order_id));
+        self.positions.insert(order_id, idx_u32);
     }
 
     fn pop_min_sequence(&mut self) -> Option<OrderId> {
@@ -29,9 +37,9 @@ impl LevelQueue {
             .entries
             .iter()
             .enumerate()
-            .min_by_key(|(_, (_, seq))| *seq)
+            .min_by_key(|(_, (seq, _))| *seq)
             .map(|(i, _)| i)?;
-        self.remove_at(idx).map(|(order_id, _)| order_id)
+        self.remove_at(idx).map(|(_, order_id)| order_id)
     }
 
     fn remove_by_id(
@@ -39,26 +47,29 @@ impl LevelQueue {
         order_id: &OrderId,
     ) -> Option<(OrderId, Sequence)> {
         let idx = *self.positions.get(order_id)?;
-        self.remove_at(idx)
+        let idx_usize = usize::try_from(idx).ok()?;
+        self.remove_at(idx_usize).map(|(seq, id)| (id, seq))
     }
 
     fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    fn iter(&self) -> impl Iterator<Item = &(OrderId, Sequence)> {
-        self.entries.iter()
+    fn iter_order_ids(&self) -> impl Iterator<Item = OrderId> + '_ {
+        self.entries.iter().map(|(_, order_id)| *order_id)
     }
 
-    fn remove_at(&mut self, idx: usize) -> Option<(OrderId, Sequence)> {
+    fn remove_at(&mut self, idx: usize) -> Option<(Sequence, OrderId)> {
         let last_idx = self.entries.len().checked_sub(1)?;
         self.entries.swap(idx, last_idx);
         let removed = self.entries.pop()?;
-        self.positions.remove(&removed.0);
+        self.positions.remove(&removed.1);
 
         if idx < self.entries.len() {
-            let moved_order_id = self.entries[idx].0;
-            self.positions.insert(moved_order_id, idx);
+            let moved_order_id = self.entries[idx].1;
+            let idx_u32 = u32::try_from(idx)
+                .expect("slot index must fit u32 (harness level size invariant)");
+            self.positions.insert(moved_order_id, idx_u32);
         }
         Some(removed)
     }
@@ -248,18 +259,22 @@ impl InMemoryPriceBook {
     where
         F: FnMut(OrderId) -> Option<Quantity>,
     {
-        let bid_qty: Quantity = self
-            .bids
-            .values()
-            .flat_map(LevelQueue::iter)
-            .filter_map(|&(id, _)| resolve(id))
-            .sum();
-        let ask_qty: Quantity = self
-            .asks
-            .values()
-            .flat_map(LevelQueue::iter)
-            .filter_map(|&(id, _)| resolve(id))
-            .sum();
+        let mut bid_qty: Quantity = 0;
+        for level in self.bids.values() {
+            for order_id in level.iter_order_ids() {
+                if let Some(qty) = resolve(order_id) {
+                    bid_qty += qty;
+                }
+            }
+        }
+        let mut ask_qty: Quantity = 0;
+        for level in self.asks.values() {
+            for order_id in level.iter_order_ids() {
+                if let Some(qty) = resolve(order_id) {
+                    ask_qty += qty;
+                }
+            }
+        }
         bid_qty + ask_qty
     }
 }
