@@ -213,6 +213,29 @@ Tradeoffs:
 
 - Slightly more memory and write-time bookkeeping (maintaining the index) in exchange for much faster cancel/remove routing in mixed workloads.
 
+#### Priority 2 result: reduce routing/index lookup overhead
+
+- Before: about **2,446,400 operations per second** (`throughput_sharded_mixed`, after Priority 1)
+- After: about **2,043,200 operations per second**
+- Relative change: roughly **16% lower throughput** in this short run (Criterion reported no statistically significant change)
+
+What we tried:
+
+- Removed an unnecessary map-presence check in the sharded mixed benchmark cancel path.
+- Changed server cancel routing from `read + get` to a single `write + remove` pass, which also cleans up stale route entries.
+
+What worked:
+
+- Server-side cancel routing is now cleaner and does one map operation while removing canceled IDs from the route index.
+
+What did not work:
+
+- This isolated step did not produce a clear throughput gain in the benchmark; measured result trended lower in this sample window.
+
+Tradeoffs:
+
+- Better route-index lifecycle behavior and simpler fast path, but no immediate benchmark win at this sampling depth.
+
 ---
 
 ## Tokio harness binaries

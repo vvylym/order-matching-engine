@@ -151,7 +151,7 @@ async fn route_and_dispatch(
             Ok(RouteResult::Ok)
         }
         WireCmd::CancelById(order_id) => {
-            let route = index.read().await.get(&order_id).copied();
+            let route = index.write().await.remove(&order_id);
             if let Some(shard) = route {
                 let _ = senders[shard].send(WorkerCmd::CancelById(
                     CancelByOrderIdCommand { order_id },
