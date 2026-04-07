@@ -27,11 +27,13 @@ rayon = { version = "1.10", optional = true }
 smallvec = "1.15"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "io-util", "time"] }
+rkyv = { version = "0.8.15", optional = true }
 
 [features]
 default = ["harness"]
 harness = []
 parallel = ["dep:rayon"]
+rkyv = ["dep:rkyv"]
 
 [lints.rust]
 unsafe_code = "forbid"
