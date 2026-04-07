@@ -436,6 +436,33 @@ Tradeoffs:
 
 - One more direct dependency and slightly more type surface (`WireCommandBuffer`) for a targeted allocation reduction on small frames.
 
+#### Priority 10 result: Tokio `mpsc` vs `crossbeam-channel` for harness workers (`p5`)
+
+What we tried:
+
+- Added a direct `crossbeam-channel` dependency and a server flag `--worker-channel {tokio,crossbeam}` (default `tokio`).
+- **Tokio path:** instrument workers stay async tasks fed by `tokio::sync::mpsc::unbounded_channel` (existing behavior).
+- **Crossbeam path:** each worker runs on a dedicated `std::thread` blocking on `crossbeam_channel::unbounded` while the accept/read loop stays on Tokio (only matcher dispatch changes).
+- Centralized `matcher_engine()` via `impl OrderMatchingService` so both paths share one builder wiring.
+
+What worked:
+
+- Single binary supports an A/B harness for worker-queue mechanics without changing wire protocol or routing semantics.
+- `make ci` and `make quality-gate` passed locally on this machine after fixing return typing and clippy (`type_complexity`, redundant import).
+
+Measured subset (`throughput_sharded_mixed` / `inmemory`, sample-size 10, short window on this machine):
+
+- Throughput interval about **6.02M to 8.89M elements/s** (Criterion printed `[6.0183, 7.2721, 8.8895] Melem/s`).
+
+What did not work:
+
+- This bench does not exercise the Tokio server binary; it only bounds in-process engine work. End-to-end Tokio vs crossbeam worker dispatch still needs a paired client/server measurement (or a dedicated bench) to attribute wall-clock differences.
+
+Tradeoffs:
+
+- Crossbeam workers add OS threads and a split runtime (async I/O + sync matchers); use it for experiments, not as a default without profiling.
+- Tokio workers keep everything on the runtime but pay `mpsc` + task scheduling overhead; the flag makes the tradeoff measurable in one place.
+
 ---
 
 ## Tokio harness binaries
@@ -443,6 +470,7 @@ Tradeoffs:
 This repo includes a lightweight benchmark harness server and client:
 
 - `cargo run --bin server -- --bind 127.0.0.1:7001 --instruments 4`
+- `cargo run --bin server -- --bind 127.0.0.1:7001 --instruments 4 --worker-channel crossbeam` (A/B: `std::thread` + crossbeam receivers per instrument; default is `tokio`)
 - `cargo run --bin client -- --addr 127.0.0.1:7001 --connections 4 --instruments 4 --batch-size 4 --duration-secs 8`
 
 Protocol is intentionally compact for measurement (not production API):
@@ -491,7 +519,7 @@ Likely high-impact areas to reduce complexity and improve speed:
 - Replace per-level linear queue search in the remaining remove paths with stable location indexing where possible.
 - Evaluate narrower data in hot structs (for example, smaller integer types where safe) to improve cache density.
 - Prototype `SmallVec` for very short command batches or temporary vectors that are frequently tiny.
-- Compare `tokio::mpsc` versus `crossbeam-channel` only on paths that are not forced to be async (sync dispatch can be cheaper).
+- Extend Tokio harness benchmarks so `--worker-channel` A/B results are measured with the same client load (today’s fixed subset stays engine-dominated and does not reflect server queue choice).
 - Remove repeated work in routing and parsing by reusing parsed command buffers and reducing map churn.
 
 ---
