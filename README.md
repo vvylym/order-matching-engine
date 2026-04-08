@@ -140,6 +140,23 @@ cargo run --release --bin client -- --addr 127.0.0.1:7001 --connections 4 --inst
 | 50,000,000 | 50,000,024 | 105.312649 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
 | 100,000,000 | 100,000,024 | 344.068611 | `BTreeOrderBook` | `HashMapOrderStore` | `NoOpEventSink` | 4 | 32 | yes |
 
+Same ladder, but with a **production-ish** sink that serializes each engine event into bytes and pushes it into a **bounded channel**:
+
+- server: `--event-sink bytes_channel --event-channel-capacity 65536`
+- sink: `BytesChannelEventSink` (binary encoding) + drain thread (consumer drops bytes)
+
+| Target `ok_ops` (stop) | `ok_ops` (actual) | Wall time (s) | PriceBook | OrderStore | EventSink | Clients | Instruments | Random |
+| ---: | ---: | ---: | --- | --- | --- | ---: | ---: | --- |
+| 1,000,000 | 1,000,024 | 0.829645 | `DashSkipOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 9.946593 | `DashSkipOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 97.935459 | `DashSkipOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 1,000,000 | 1,000,024 | 0.964600 | `PoolLevelOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 11.595107 | `PoolLevelOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 96.251835 | `PoolLevelOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 1,000,000 | 1,000,024 | 0.896606 | `BTreeOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 10,000,000 | 10,000,024 | 11.501406 | `BTreeOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+| 50,000,000 | 50,000,024 | 97.253584 | `BTreeOrderBook` | `HashMapOrderStore` | `BytesChannelEventSink` | 4 | 32 | yes |
+
 ## Contributing
 
 Workflow: issue → branch → small commits → PR → review. Run `make ci` before pushing; optionally `make quality-gate`. Details: [`CONTRIBUTING.md`](CONTRIBUTING.md).

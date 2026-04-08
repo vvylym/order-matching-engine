@@ -174,60 +174,110 @@ async fn run_worker(
         (0..instrument_count).map(|_| VecDeque::new()).collect();
 
     loop {
-        if let Some(dl) = config.deadline
-            && Instant::now() >= dl
-        {
-            break;
-        }
-        if let Some(target) = config.target_ok_ops
-            && ok_ops.load(Ordering::Relaxed) >= target
-        {
+        if should_stop(&config, &ok_ops) {
             break;
         }
 
-        let frame = if config.random {
-            workload_frame_random(
-                &mut rng,
-                &mut order_id,
-                &mut open_by_instrument,
-                config.instruments,
-                config.batch_size,
-                worker_id,
-            )
-        } else {
-            workload_frame_deterministic(
-                i,
-                order_id,
-                config.instruments,
-                config.batch_size,
-                &mut cancel_id,
-            )
-        };
-        let line = encode_frame(&frame)?;
+        let frame = next_frame(
+            &config,
+            &mut rng,
+            &mut order_id,
+            &mut open_by_instrument,
+            &mut cancel_id,
+            &mut i,
+            worker_id,
+        );
+
         let frame_len = frame.commands.len() as u64;
+        let line = encode_frame(&frame)?;
         let t0 = Instant::now();
         write_half.write_all(line.as_bytes()).await?;
-        match lines.next_line().await? {
-            Some(resp) if resp.starts_with("OK") => {
-                let prev = ok_ops.fetch_add(frame_len, Ordering::Relaxed);
-                total_lat_nanos
-                    .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
-                if let Some(target) = config.target_ok_ops
-                    && prev.saturating_add(frame_len) >= target
-                {
-                    break;
-                }
-            }
-            Some(_) | None => {
-                err_ops.fetch_add(frame_len, Ordering::Relaxed);
-            }
-        }
-        if !config.random {
-            order_id = order_id.wrapping_add(frame_len);
-            i = i.wrapping_add(frame_len);
+        let resp = lines.next_line().await?;
+        if apply_response(
+            resp.as_deref(),
+            frame_len,
+            &config,
+            &ok_ops,
+            &err_ops,
+            &total_lat_nanos,
+            t0,
+        ) {
+            break;
         }
     }
     Ok(())
+}
+
+fn should_stop(config: &WorkerConfig, ok_ops: &Metrics) -> bool {
+    if let Some(dl) = config.deadline
+        && Instant::now() >= dl
+    {
+        return true;
+    }
+    if let Some(target) = config.target_ok_ops
+        && ok_ops.load(Ordering::Relaxed) >= target
+    {
+        return true;
+    }
+    false
+}
+
+fn next_frame(
+    config: &WorkerConfig,
+    rng: &mut SmallRng,
+    order_id: &mut u64,
+    open_by_instrument: &mut OpenOrders,
+    cancel_id: &mut Option<u64>,
+    i: &mut u64,
+    worker_id: usize,
+) -> WireFrame {
+    if config.random {
+        return workload_frame_random(
+            rng,
+            order_id,
+            open_by_instrument,
+            config.instruments,
+            config.batch_size,
+            worker_id,
+        );
+    }
+    let frame = workload_frame_deterministic(
+        *i,
+        *order_id,
+        config.instruments,
+        config.batch_size,
+        cancel_id,
+    );
+    *order_id = order_id.wrapping_add(frame.commands.len() as u64);
+    *i = i.wrapping_add(frame.commands.len() as u64);
+    frame
+}
+
+fn apply_response(
+    resp: Option<&str>,
+    frame_len: u64,
+    config: &WorkerConfig,
+    ok_ops: &Metrics,
+    err_ops: &Metrics,
+    total_lat_nanos: &Metrics,
+    t0: Instant,
+) -> bool {
+    match resp {
+        Some(r) if r.starts_with("OK") => {
+            let prev = ok_ops.fetch_add(frame_len, Ordering::Relaxed);
+            total_lat_nanos
+                .fetch_add(t0.elapsed().as_nanos() as u64, Ordering::Relaxed);
+            if let Some(target) = config.target_ok_ops
+                && prev.saturating_add(frame_len) >= target
+            {
+                return true;
+            }
+        }
+        Some(_) | None => {
+            err_ops.fetch_add(frame_len, Ordering::Relaxed);
+        }
+    }
+    false
 }
 
 fn workload_frame_deterministic(
