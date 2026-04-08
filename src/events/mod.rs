@@ -8,6 +8,9 @@ use crate::{
     types::{OrderId, Trade},
 };
 
+mod bytes_channel;
+pub use bytes_channel::BytesChannelEventSink;
+
 /// Event sink that discards all events (e.g. for ingestion tests).
 #[derive(Debug, Clone, Default)]
 pub struct NoOpEventSink;
